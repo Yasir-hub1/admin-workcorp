@@ -19,11 +19,8 @@
   <link rel="apple-touch-icon" sizes="192x192" href="/pwa-192x192.png">
   <link rel="apple-touch-icon" sizes="512x512" href="/pwa-512x512.png">
 
-  <!-- PWA Manifest -->
-  <link rel="manifest" href="/build/manifest.webmanifest">
-
   @viteReactRefresh
-  @vite(['resources/css/app.css','resources/js/app.jsx'])
+  @vite(['resources/css/app.css', 'resources/js/app.jsx'])
 </head>
 <body>
   <div id="app"></div>

@@ -2,20 +2,41 @@ import { defineConfig } from 'vite';
 import laravel from 'laravel-vite-plugin';
 import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
+import tailwindcss from '@tailwindcss/vite';
 
 export default defineConfig({
   plugins: [
+    tailwindcss(),
     laravel({
       input: ['resources/css/app.css', 'resources/js/app.jsx'],
       refresh: true,
     }),
-    react(),
+    react({
+      include: '**/*.{jsx,tsx}',
+    }),
     VitePWA({
       registerType: 'autoUpdate',
+      strategies: 'generateSW',
       includeAssets: ['favicon.ico', 'robots.txt'],
+      filename: 'sw.js',
       workbox: {
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2,woff,ttf}'],
+        globIgnores: ['**/node_modules/**/*'],
         runtimeCaching: [
+          {
+            urlPattern: /^https?:\/\/.*\.(?:css|woff2?|ttf|eot)/i,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'static-resources-cache',
+              expiration: {
+                maxEntries: 100,
+                maxAgeSeconds: 60 * 60 * 24 * 365 // 1 año
+              },
+              cacheableResponse: {
+                statuses: [0, 200]
+              }
+            }
+          },
           {
             urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
             handler: 'CacheFirst',
@@ -85,7 +106,7 @@ export default defineConfig({
         skipWaiting: true
       },
       devOptions: {
-        enabled: process.env.NODE_ENV === 'development' ? false : true, // Deshabilitar en desarrollo para evitar problemas
+        enabled: true, // Habilitar en desarrollo para que funcione el Service Worker
         type: 'module',
         navigateFallback: 'index.html'
       },

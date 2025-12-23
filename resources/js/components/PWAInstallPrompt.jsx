@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 
 export function PWAInstallPrompt() {
   const [deferredPrompt, setDeferredPrompt] = useState(null);
@@ -54,59 +55,45 @@ export function PWAInstallPrompt() {
     setShowInstallButton(false);
   };
 
-  if (!showInstallButton) {
-    return null;
-  }
-
   return (
-    <div
-      style={{
-        position: 'fixed',
-        bottom: 20,
-        right: 20,
-        padding: '16px',
-        backgroundColor: '#007bff',
-        color: 'white',
-        borderRadius: '8px',
-        boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
-        zIndex: 1000,
-        maxWidth: '300px',
-      }}
-    >
-      <p style={{ margin: '0 0 12px 0', fontSize: '14px' }}>
-        Instala esta app en tu dispositivo para una mejor experiencia
-      </p>
-      <div style={{ display: 'flex', gap: '8px' }}>
-        <button
-          onClick={handleInstallClick}
-          style={{
-            padding: '8px 16px',
-            backgroundColor: 'white',
-            color: '#007bff',
-            border: 'none',
-            borderRadius: '4px',
-            cursor: 'pointer',
-            fontWeight: 'bold',
-            flex: 1,
-          }}
+    <AnimatePresence>
+      {showInstallButton && (
+        <motion.div
+          initial={{ opacity: 0, x: 100, scale: 0.8 }}
+          animate={{ opacity: 1, x: 0, scale: 1 }}
+          exit={{ opacity: 0, x: 100, scale: 0.8 }}
+          transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+          className="fixed bottom-5 right-5 p-4 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg shadow-xl z-50 max-w-xs"
         >
-          Instalar
-        </button>
-        <button
-          onClick={() => setShowInstallButton(false)}
-          style={{
-            padding: '8px 16px',
-            backgroundColor: 'transparent',
-            color: 'white',
-            border: '1px solid white',
-            borderRadius: '4px',
-            cursor: 'pointer',
-          }}
-        >
-          Cerrar
-        </button>
-      </div>
-    </div>
+          <motion.p
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.2 }}
+            className="mb-3 text-sm font-medium"
+          >
+            Instala esta app en tu dispositivo para una mejor experiencia
+          </motion.p>
+          <div className="flex gap-2">
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={handleInstallClick}
+              className="px-4 py-2 bg-white text-blue-600 border-none rounded-md cursor-pointer font-bold flex-1 transition-all hover:bg-gray-100"
+            >
+              Instalar
+            </motion.button>
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={() => setShowInstallButton(false)}
+              className="px-4 py-2 bg-transparent text-white border border-white rounded-md cursor-pointer transition-all hover:bg-white/20"
+            >
+              Cerrar
+            </motion.button>
+          </div>
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 }
 

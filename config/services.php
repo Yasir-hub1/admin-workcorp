@@ -35,4 +35,10 @@ return [
         ],
     ],
 
+    'vapid' => [
+        'subject' => env('VAPID_SUBJECT', 'mailto:yasirarce@kreativabo.com'),
+        'public_key' => env('VAPID_PUBLIC_KEY', 'BLSyF0ihMaEN_AGFYfIN6mNztJiViEiefGwmnznusI7vBOEO97nH_XVUDOdZq3LWMmLoNlXubFfp6raPDEcaLP4'),
+        'private_key' => env('VAPID_PRIVATE_KEY', 'n3DDl883Fxd0uLIeWr56L3qX9_ceLMgfDh1TMQui7S4'),
+    ],
+
 ];
