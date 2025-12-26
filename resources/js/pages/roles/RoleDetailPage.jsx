@@ -25,6 +25,7 @@ export default function RoleDetailPage() {
   const queryClient = useQueryClient();
   const { isAuthenticated, user } = useAuthStore();
   const isSuperAdmin = useAuthStore((state) => state.isSuperAdmin);
+  const hasPermission = useAuthStore((state) => state.hasPermission);
 
   const [showDeleteModal, setShowDeleteModal] = useState(false);
 
@@ -42,8 +43,8 @@ export default function RoleDetailPage() {
   const role = roleData;
 
   // Verificar permisos
-  const canEdit = role && isSuperAdmin();
-  const canDelete = role && isSuperAdmin() && !['super_admin', 'jefe_area', 'personal'].includes(role.name);
+  const canEdit = role && (isSuperAdmin() || hasPermission('roles.edit'));
+  const canDelete = role && (isSuperAdmin() || hasPermission('roles.delete')) && !['super_admin', 'jefe_area', 'personal'].includes(role.name);
 
   // Mutation para eliminar
   const deleteMutation = useMutation({

@@ -9,6 +9,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Database\UniqueConstraintViolationException;
 
 class PushSubscriptionController extends Controller
 {
@@ -40,13 +41,16 @@ class PushSubscriptionController extends Controller
             'has_keys' => !empty($request->keys['p256dh']) && !empty($request->keys['auth']),
         ]);
 
-        // Buscar si ya existe una suscripción con este endpoint
-        $subscription = PushSubscription::where('endpoint', $request->endpoint)->first();
+        // Endpoint es UNIQUE. Si el mismo navegador re-loguea con otro usuario, debemos "transferir"
+        // la suscripción (actualizar user_id) en vez de intentar crear una nueva fila.
+        try {
+            $subscription = PushSubscription::where('endpoint', $request->endpoint)->first();
+            $wasCreated = false;
+            $previousUserId = $subscription?->user_id;
 
-        if ($subscription) {
-            // Actualizar si pertenece al mismo usuario
-            if ($subscription->user_id === $user->id) {
+            if ($subscription) {
                 $subscription->update([
+                    'user_id' => $user->id,
                     'public_key' => $request->keys['p256dh'],
                     'auth_token' => $request->keys['auth'],
                     // Minishlink/web-push v10 requiere contentEncoding. En navegadores modernos es aes128gcm.
@@ -55,7 +59,6 @@ class PushSubscriptionController extends Controller
                     'is_active' => true,
                 ]);
             } else {
-                // Si pertenece a otro usuario, crear una nueva
                 $subscription = PushSubscription::create([
                     'user_id' => $user->id,
                     'endpoint' => $request->endpoint,
@@ -66,32 +69,50 @@ class PushSubscriptionController extends Controller
                     'user_agent' => $request->userAgent(),
                     'is_active' => true,
                 ]);
+                $wasCreated = true;
             }
-        } else {
-            // Crear nueva suscripción
-            $subscription = PushSubscription::create([
-                'user_id' => $user->id,
-                'endpoint' => $request->endpoint,
-                'public_key' => $request->keys['p256dh'],
-                'auth_token' => $request->keys['auth'],
-                // Minishlink/web-push v10 requiere contentEncoding. En navegadores modernos es aes128gcm.
-                'content_encoding' => 'aes128gcm',
-                'user_agent' => $request->userAgent(),
-                'is_active' => true,
+
+            Log::info('Push Subscription: Subscription upserted', [
+                'subscription_id' => $subscription->id,
+                'user_id' => $subscription->user_id,
+                'previous_user_id' => $previousUserId,
+                'was_created' => $wasCreated,
+                'is_active' => $subscription->is_active,
             ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => $wasCreated ? 'Suscripción registrada correctamente' : 'Suscripción actualizada correctamente',
+                'data' => $subscription,
+            ], $wasCreated ? 201 : 200);
+        } catch (UniqueConstraintViolationException $e) {
+            // Carreras: dos requests simultáneos pueden intentar insertar el mismo endpoint.
+            // En ese caso, cargamos y actualizamos la fila existente.
+            Log::warning('Push Subscription: Unique constraint hit, retrying as update', [
+                'user_id' => $user->id,
+                'endpoint' => substr($request->endpoint, 0, 50) . '...',
+            ]);
+
+            $subscription = PushSubscription::where('endpoint', $request->endpoint)->first();
+            if ($subscription) {
+                $subscription->update([
+                    'user_id' => $user->id,
+                    'public_key' => $request->keys['p256dh'],
+                    'auth_token' => $request->keys['auth'],
+                    'content_encoding' => 'aes128gcm',
+                    'user_agent' => $request->userAgent(),
+                    'is_active' => true,
+                ]);
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Suscripción actualizada correctamente',
+                'data' => $subscription,
+            ], 200);
         }
 
-        Log::info('Push Subscription: Subscription saved', [
-            'subscription_id' => $subscription->id,
-            'user_id' => $subscription->user_id,
-            'is_active' => $subscription->is_active,
-        ]);
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Suscripción registrada correctamente',
-            'data' => $subscription,
-        ], 201);
+        // unreachable
     }
 
     /**

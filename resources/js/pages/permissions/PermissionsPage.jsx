@@ -13,10 +13,12 @@ import Select from '../../components/common/Select';
 import Input from '../../components/common/Input';
 import { debounce } from '../../utils/helpers';
 import toast from 'react-hot-toast';
+import useAuthStore from '../../store/authStore';
 
 export default function PermissionsPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { hasPermission, isSuperAdmin } = useAuthStore();
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
@@ -117,13 +119,15 @@ export default function PermissionsPage() {
           >
             Ver
           </button>
-          <button
-            onClick={() => navigate(`/permissions/${row.id}/edit`)}
-            className="text-gray-600 hover:text-gray-900 text-sm font-medium"
-          >
-            Editar
-          </button>
-          {row.roles_count === 0 && (
+          {(isSuperAdmin() || hasPermission('permissions.edit')) && (
+            <button
+              onClick={() => navigate(`/permissions/${row.id}/edit`)}
+              className="text-gray-600 hover:text-gray-900 text-sm font-medium"
+            >
+              Editar
+            </button>
+          )}
+          {(isSuperAdmin() || hasPermission('permissions.delete')) && row.roles_count === 0 && (
             <button
               onClick={() => {
                 if (window.confirm('¿Estás seguro de eliminar este permiso?')) {
@@ -140,6 +144,17 @@ export default function PermissionsPage() {
     },
   ];
 
+  if (!isSuperAdmin() && !hasPermission('permissions.view')) {
+    return (
+      <AppLayout>
+        <Card>
+          <div className="text-gray-900 font-semibold">Permisos</div>
+          <div className="text-sm text-gray-500 mt-1">No tienes permisos para ver este módulo.</div>
+        </Card>
+      </AppLayout>
+    );
+  }
+
   return (
     <AppLayout>
       <div className="space-y-6">
@@ -151,9 +166,11 @@ export default function PermissionsPage() {
               Gestiona los permisos del sistema
             </p>
           </div>
-          <Button icon={PlusIcon} onClick={() => navigate('/permissions/create')}>
-            Nuevo Permiso
-          </Button>
+          {(isSuperAdmin() || hasPermission('permissions.create')) && (
+            <Button icon={PlusIcon} onClick={() => navigate('/permissions/create')}>
+              Nuevo Permiso
+            </Button>
+          )}
         </div>
 
         {/* Filters */}

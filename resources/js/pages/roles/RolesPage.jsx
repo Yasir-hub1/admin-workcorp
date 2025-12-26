@@ -13,10 +13,12 @@ import Select from '../../components/common/Select';
 import Input from '../../components/common/Input';
 import { debounce } from '../../utils/helpers';
 import toast from 'react-hot-toast';
+import useAuthStore from '../../store/authStore';
 
 export default function RolesPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { hasPermission, isSuperAdmin } = useAuthStore();
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
@@ -117,13 +119,15 @@ export default function RolesPage() {
           >
             Ver
           </button>
-          <button
-            onClick={() => navigate(`/roles/${row.id}/edit`)}
-            className="text-gray-600 hover:text-gray-900 text-sm font-medium"
-          >
-            Editar
-          </button>
-          {!['super_admin', 'jefe_area', 'personal'].includes(row.name) && (
+          {(isSuperAdmin() || hasPermission('roles.edit')) && (
+            <button
+              onClick={() => navigate(`/roles/${row.id}/edit`)}
+              className="text-gray-600 hover:text-gray-900 text-sm font-medium"
+            >
+              Editar
+            </button>
+          )}
+          {(isSuperAdmin() || hasPermission('roles.delete')) && !['super_admin', 'jefe_area', 'personal'].includes(row.name) && (
             <button
               onClick={() => {
                 if (window.confirm('¿Estás seguro de eliminar este rol?')) {
@@ -140,6 +144,17 @@ export default function RolesPage() {
     },
   ];
 
+  if (!isSuperAdmin() && !hasPermission('roles.view')) {
+    return (
+      <AppLayout>
+        <Card>
+          <div className="text-gray-900 font-semibold">Roles</div>
+          <div className="text-sm text-gray-500 mt-1">No tienes permisos para ver este módulo.</div>
+        </Card>
+      </AppLayout>
+    );
+  }
+
   return (
     <AppLayout>
       <div className="space-y-6">
@@ -151,9 +166,11 @@ export default function RolesPage() {
               Gestiona los roles y sus permisos del sistema
             </p>
           </div>
-          <Button icon={PlusIcon} onClick={() => navigate('/roles/create')}>
-            Nuevo Rol
-          </Button>
+          {(isSuperAdmin() || hasPermission('roles.create')) && (
+            <Button icon={PlusIcon} onClick={() => navigate('/roles/create')}>
+              Nuevo Rol
+            </Button>
+          )}
         </div>
 
         {/* Filters */}

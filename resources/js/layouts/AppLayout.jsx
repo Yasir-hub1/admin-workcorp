@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../hooks/useAuth';
 import useAuthStore from '../store/authStore';
 import { usePushNotifications } from '../hooks/usePushNotifications';
@@ -33,33 +33,91 @@ import {
 
 const navigation = [
   { name: 'Dashboard', href: '/dashboard', icon: HomeIcon },
-  { name: 'Asistencias', href: '/attendance', icon: ClockIcon },
-  { name: 'Solicitudes', href: '/requests', icon: DocumentTextIcon },
-  { name: 'Horarios', href: '/schedules', icon: CalendarIcon },
-  { name: 'Reuniones', href: '/meetings', icon: CalendarDaysIcon },
-  { name: 'Tickets', href: '/tickets', icon: TicketIcon },
-  { name: 'Activos', href: '/assets', icon: BuildingOfficeIcon },
-  { name: 'Gastos', href: '/expenses', icon: CurrencyDollarIcon },
-  { name: 'Clientes', href: '/clients', icon: UserGroupIcon },
-  { name: 'Servicios', href: '/services', icon: Cog6ToothIcon },
-  { name: 'Inventario', href: '/inventory', icon: CubeIcon },
-  { name: 'Personal', href: '/staff', icon: UserGroupIcon },
-  { name: 'Usuarios', href: '/users', icon: UserGroupIcon },
-  { name: 'Áreas', href: '/areas', icon: BuildingOffice2Icon },
-  { name: 'Roles', href: '/roles', icon: ShieldCheckIcon },
-  { name: 'Permisos', href: '/permissions', icon: KeyIcon },
-  { name: 'Notificaciones', href: '/notifications', icon: BellIcon },
-  { name: 'Reportes', href: '/reports', icon: ChartBarIcon },
-  { name: 'Estadísticas', href: '/statistics', icon: PresentationChartLineIcon },
+  {
+    name: 'Asistencias',
+    href: '/attendance',
+    icon: ClockIcon,
+    anyPermissions: ['attendance.view-all', 'attendance.view-area', 'attendance.view-own', 'attendance.clock'],
+  },
+  {
+    name: 'Solicitudes',
+    href: '/requests',
+    icon: DocumentTextIcon,
+    anyPermissions: ['requests.view-all', 'requests.view-area', 'requests.view-own', 'requests.create'],
+  },
+  {
+    name: 'Horarios',
+    href: '/schedules',
+    icon: CalendarIcon,
+    anyPermissions: ['schedules.view-all', 'schedules.view-area', 'schedules.view-own', 'schedules.create'],
+  },
+  {
+    name: 'Reuniones',
+    href: '/meetings',
+    icon: CalendarDaysIcon,
+    anyPermissions: ['meetings.view-all', 'meetings.view-area', 'meetings.view-own', 'meetings.create'],
+  },
+  {
+    name: 'Tickets',
+    href: '/tickets',
+    icon: TicketIcon,
+    anyPermissions: ['tickets.view-all', 'tickets.view-area', 'tickets.view-own', 'tickets.create'],
+  },
+  {
+    name: 'Activos',
+    href: '/assets',
+    icon: BuildingOfficeIcon,
+    anyPermissions: ['assets.view-all', 'assets.view-area', 'assets.view-own', 'assets.create'],
+  },
+  {
+    name: 'Gastos',
+    href: '/expenses',
+    icon: CurrencyDollarIcon,
+    anyPermissions: ['expenses.view-all', 'expenses.view-area', 'expenses.view-own', 'expenses.create'],
+  },
+  {
+    name: 'Clientes',
+    href: '/clients',
+    icon: UserGroupIcon,
+    anyPermissions: ['clients.view-all', 'clients.view-area', 'clients.view-own', 'clients.create'],
+  },
+  {
+    name: 'Servicios',
+    href: '/services',
+    icon: Cog6ToothIcon,
+    anyPermissions: ['services.view-all', 'services.view-area', 'services.view-own', 'services.create'],
+  },
+  {
+    name: 'Inventario',
+    href: '/inventory',
+    icon: CubeIcon,
+    anyPermissions: ['inventory.view-all', 'inventory.view-area', 'inventory.create'],
+  },
+  {
+    name: 'Personal',
+    href: '/staff',
+    icon: UserGroupIcon,
+    anyPermissions: ['staff.view-all', 'staff.view-own'],
+  },
+  { name: 'Usuarios', href: '/users', icon: UserGroupIcon, anyPermissions: ['users.view'] },
+  { name: 'Áreas', href: '/areas', icon: BuildingOffice2Icon, anyPermissions: ['areas.view'] },
+  { name: 'Roles', href: '/roles', icon: ShieldCheckIcon, anyPermissions: ['roles.view'] },
+  { name: 'Permisos', href: '/permissions', icon: KeyIcon, anyPermissions: ['permissions.view'] },
+  { name: 'Notificaciones', href: '/notifications', icon: BellIcon, anyPermissions: ['notifications.view'] },
+  { name: 'Reportes', href: '/reports', icon: ChartBarIcon, anyPermissions: ['reports.view-all', 'reports.view-area'] },
+  { name: 'Estadísticas', href: '/statistics', icon: PresentationChartLineIcon, anyPermissions: ['statistics.view'] },
 ];
 
 export default function AppLayout({ children }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
+  const [notifOpen, setNotifOpen] = useState(false);
+  const notifRef = useRef(null);
   const location = useLocation();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { logoutMutation } = useAuth();
-  const { user, isSuperAdmin, isJefeArea, isPersonal } = useAuthStore();
+  const { user, isSuperAdmin, isJefeArea, isPersonal, hasPermission } = useAuthStore();
   
   // Inicializar push notifications para admins y jefes de área
   usePushNotifications(user && (isSuperAdmin() || isJefeArea()));
@@ -76,6 +134,43 @@ export default function AppLayout({ children }) {
   });
 
   const unreadCount = unreadCountData || 0;
+
+  const { data: recentNotificationsData, isLoading: isLoadingRecent } = useQuery({
+    queryKey: ['notifications', 'recent'],
+    queryFn: async () => {
+      const response = await apiClient.get('/notifications', { params: { per_page: 5 } });
+      return response.data;
+    },
+    enabled: !!user,
+    staleTime: 15000,
+  });
+
+  const recentNotifications = recentNotificationsData?.data || [];
+
+  const markAsReadMutation = useMutation({
+    mutationFn: async (notificationId) => {
+      const response = await apiClient.post(`/notifications/${notificationId}/mark-as-read`);
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries(['notifications']);
+      queryClient.invalidateQueries(['notifications', 'unread-count']);
+      queryClient.invalidateQueries(['notifications', 'recent']);
+    },
+  });
+
+  const markAllAsReadMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiClient.post('/notifications/mark-all-as-read');
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries(['notifications']);
+      queryClient.invalidateQueries(['notifications', 'unread-count']);
+      queryClient.invalidateQueries(['notifications', 'recent']);
+      toast.success('Todas las notificaciones marcadas como leídas');
+    },
+  });
 
   // Detectar si es móvil
   useEffect(() => {
@@ -95,6 +190,24 @@ export default function AppLayout({ children }) {
       setSidebarOpen(true);
     }
   }, [isMobile]);
+
+  // Cerrar dropdown de notificaciones al navegar
+  useEffect(() => {
+    setNotifOpen(false);
+  }, [location.pathname]);
+
+  // Cerrar dropdown al hacer click fuera
+  useEffect(() => {
+    if (!notifOpen) return;
+    const onDocClick = (e) => {
+      if (!notifRef.current) return;
+      if (!notifRef.current.contains(e.target)) {
+        setNotifOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, [notifOpen]);
 
 
   const handleLogout = () => {
@@ -190,7 +303,14 @@ export default function AppLayout({ children }) {
 
           {/* Navigation */}
           <nav className="flex-1 px-2 py-4 space-y-1 overflow-y-auto">
-            {navigation.map((item, index) => {
+            {navigation
+              .filter((item) => {
+                if (!user) return false;
+                if (isSuperAdmin()) return true;
+                if (!item.anyPermissions || item.anyPermissions.length === 0) return true;
+                return item.anyPermissions.some((p) => hasPermission(p));
+              })
+              .map((item, index) => {
               const isActive = location.pathname === item.href || location.pathname.startsWith(item.href + '/');
               return (
                 <motion.div
@@ -292,19 +412,121 @@ export default function AppLayout({ children }) {
               )}
 
               {/* Icono de notificaciones en el top bar */}
-              <motion.button
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                onClick={() => navigate('/notifications')}
-                className="relative inline-flex items-center justify-center h-9 w-9 rounded-full border border-gray-200 bg-white text-gray-500 hover:text-indigo-600 hover:border-indigo-200 shadow-sm transition-colors"
-              >
-                <BellIcon className="h-5 w-5" />
-                {unreadCount > 0 && (
-                  <span className="absolute -top-1 -right-1 inline-flex items-center justify-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-red-500 text-white shadow">
-                    {unreadCount > 9 ? '9+' : unreadCount}
-                  </span>
-                )}
-              </motion.button>
+              <div className="relative" ref={notifRef}>
+                <motion.button
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setNotifOpen((v) => !v);
+                  }}
+                  className="relative inline-flex items-center justify-center h-9 w-9 rounded-full border border-gray-200 bg-white text-gray-500 hover:text-indigo-600 hover:border-indigo-200 shadow-sm transition-colors"
+                  title="Notificaciones"
+                >
+                  <BellIcon className="h-5 w-5" />
+                  {unreadCount > 0 && (
+                    <span className="absolute -top-1 -right-1 inline-flex items-center justify-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-red-500 text-white shadow">
+                      {unreadCount > 9 ? '9+' : unreadCount}
+                    </span>
+                  )}
+                </motion.button>
+
+                <AnimatePresence>
+                  {notifOpen && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: 8 }}
+                      transition={{ duration: 0.15 }}
+                      className="absolute right-0 mt-2 w-96 max-w-[90vw] rounded-xl border border-gray-200 bg-white shadow-xl overflow-hidden z-50"
+                    >
+                      <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+                        <div className="text-sm font-semibold text-gray-900">Recientes</div>
+                        {unreadCount > 0 && (
+                          <button
+                            type="button"
+                            className="text-xs font-medium text-indigo-600 hover:text-indigo-800"
+                            onClick={() => markAllAsReadMutation.mutate()}
+                          >
+                            Marcar todas
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="max-h-96 overflow-auto">
+                        {isLoadingRecent ? (
+                          <div className="p-4 text-sm text-gray-500">Cargando...</div>
+                        ) : recentNotifications.length === 0 ? (
+                          <div className="p-4 text-sm text-gray-500">No hay notificaciones recientes.</div>
+                        ) : (
+                          <div className="divide-y divide-gray-100">
+                            {recentNotifications.map((n) => (
+                              <button
+                                key={n.id}
+                                type="button"
+                                onClick={async () => {
+                                  const canMutate = !isSuperAdmin() || n.user_id === user?.id;
+                                  if (canMutate && !n.is_read) {
+                                    try {
+                                      await markAsReadMutation.mutateAsync(n.id);
+                                    } catch (_) {}
+                                  }
+                                  setNotifOpen(false);
+                                  if (n.action_url) {
+                                    navigate(n.action_url);
+                                  } else {
+                                    navigate('/notifications');
+                                  }
+                                }}
+                                className={`w-full text-left px-4 py-3 hover:bg-gray-50 transition-colors ${
+                                  !n.is_read ? 'bg-indigo-50/40' : ''
+                                }`}
+                              >
+                                <div className="flex items-start gap-2">
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-2">
+                                      <div className="text-sm font-semibold text-gray-900 truncate">{n.title}</div>
+                                      {!n.is_read && <span className="h-2 w-2 rounded-full bg-indigo-600" />}
+                                      {isSuperAdmin() && n.user && (
+                                        <span className="text-[11px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-700">
+                                          {n.user.name}
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div className="text-xs text-gray-600 mt-1 line-clamp-2">{n.message}</div>
+                                    <div className="text-[11px] text-gray-500 mt-2 flex items-center gap-2">
+                                      <span className="capitalize">{n.type}</span>
+                                      <span>•</span>
+                                      <span>{new Date(n.created_at).toLocaleString()}</span>
+                                    </div>
+                                  </div>
+                                </div>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="px-4 py-3 border-t border-gray-100 flex items-center justify-between">
+                        <button
+                          type="button"
+                          className="text-sm font-medium text-indigo-600 hover:text-indigo-800"
+                          onClick={() => {
+                            setNotifOpen(false);
+                            navigate('/notifications');
+                          }}
+                        >
+                          Ver todas
+                        </button>
+                        <div className="text-xs text-gray-500">
+                          {unreadCount > 0 ? `${unreadCount} sin leer` : '0 sin leer'}
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
             </div>
           </div>
         </motion.div>

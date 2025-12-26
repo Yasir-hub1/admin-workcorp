@@ -159,6 +159,8 @@ class NotificationService
 
         if (!empty($userIds)) {
             self::notifyMany($userIds, $type, $title, $message, $actionUrl, $priority, $data);
+            // Enviar push notifications también a super admins
+            self::sendPushNotifications($userIds, $title, $message, $actionUrl, $data);
         }
     }
 

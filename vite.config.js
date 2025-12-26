@@ -106,7 +106,7 @@ export default defineConfig({
         skipWaiting: true
       },
       devOptions: {
-        enabled: true, // Habilitar en desarrollo para que funcione el Service Worker
+        enabled: false, // Habilitar en desarrollo para que funcione el Service Worker
         type: 'module',
         navigateFallback: 'index.html'
       },

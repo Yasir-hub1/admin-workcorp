@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { BellIcon, CheckCircleIcon, MapPinIcon } from '@heroicons/react/24/outline';
 import AppLayout from '../layouts/AppLayout';
 import apiClient from '../api/client';
@@ -10,9 +11,13 @@ import EmptyState from '../components/common/EmptyState';
 import LocationViewModal from '../components/common/LocationViewModal';
 import { formatDate } from '../utils/formatters';
 import toast from 'react-hot-toast';
+import useAuthStore from '../store/authStore';
 
 export default function NotificationsPage() {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const user = useAuthStore((s) => s.user);
+  const isSuperAdmin = useAuthStore((s) => s.isSuperAdmin);
   const [filters, setFilters] = useState({
     is_read: '',
     type: '',
@@ -112,6 +117,24 @@ export default function NotificationsPage() {
 
   const notifications = data?.data || [];
 
+  const handleOpenNotification = async (notification) => {
+    // Admin puede marcar como leída cualquier notificación (vista global)
+    if (!notification.is_read) {
+      try {
+        await markAsReadMutation.mutateAsync(notification.id);
+        queryClient.invalidateQueries(['notifications', 'unread-count']);
+      } catch (_) {
+        // Si falla marcar como leída, igual navegamos
+      }
+    }
+
+    if (notification.action_url) {
+      navigate(notification.action_url);
+    } else {
+      navigate('/notifications');
+    }
+  };
+
   return (
     <AppLayout>
       <div className="space-y-6">
@@ -122,7 +145,9 @@ export default function NotificationsPage() {
             <p className="mt-1 text-sm text-gray-500">
               {unreadCount > 0 && (
                 <span className="text-indigo-600 font-medium">
-                  Tienes {unreadCount} notificación{unreadCount !== 1 ? 'es' : ''} sin leer
+                  {isSuperAdmin()
+                    ? `Pendientes globales: ${unreadCount}`
+                    : `Tienes ${unreadCount} notificación${unreadCount !== 1 ? 'es' : ''} sin leer`}
                 </span>
               )}
             </p>
@@ -201,6 +226,11 @@ export default function NotificationsPage() {
                       <h3 className="font-semibold text-gray-900">
                         {notification.title}
                       </h3>
+                      {isSuperAdmin() && notification.user && (
+                        <Badge variant="secondary" size="sm">
+                          {notification.user.name}
+                        </Badge>
+                      )}
                       {!notification.is_read && (
                         <div className="h-2 w-2 rounded-full bg-indigo-600" />
                       )}
@@ -232,23 +262,26 @@ export default function NotificationsPage() {
                         <CheckCircleIcon className="h-5 w-5" />
                       </button>
                     )}
-                    <button
-                      onClick={() => deleteMutation.mutate(notification.id)}
-                      className="text-red-600 hover:text-red-900 text-sm font-medium"
-                      title="Eliminar"
-                    >
-                      ×
-                    </button>
+                    {(!isSuperAdmin() || notification.user_id === user?.id) && (
+                      <button
+                        onClick={() => deleteMutation.mutate(notification.id)}
+                        className="text-red-600 hover:text-red-900 text-sm font-medium"
+                        title="Eliminar"
+                      >
+                        ×
+                      </button>
+                    )}
                   </div>
                 </div>
                 {notification.action_url && (
                   <div className="mt-3">
-                    <a
-                      href={notification.action_url}
+                    <button
+                      type="button"
+                      onClick={() => handleOpenNotification(notification)}
                       className="text-sm text-indigo-600 hover:text-indigo-900 font-medium"
                     >
                       Ver detalles →
-                    </a>
+                    </button>
                   </div>
                 )}
                 {/* Botón Ver Mapa para notificaciones de asistencia */}

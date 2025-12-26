@@ -18,7 +18,21 @@ export default function CreatePermissionPage() {
   const { id } = useParams();
   const queryClient = useQueryClient();
   const { isAuthenticated, user } = useAuthStore();
+  const isSuperAdmin = useAuthStore((s) => s.isSuperAdmin);
+  const hasPermission = useAuthStore((s) => s.hasPermission);
   const isEditMode = !!id;
+
+  const canAccess = isSuperAdmin() || hasPermission(isEditMode ? 'permissions.edit' : 'permissions.create');
+  if (!canAccess) {
+    return (
+      <AppLayout>
+        <Card>
+          <div className="text-gray-900 font-semibold">{isEditMode ? 'Editar Permiso' : 'Nuevo Permiso'}</div>
+          <div className="text-sm text-gray-500 mt-1">No tienes permisos para realizar esta acción.</div>
+        </Card>
+      </AppLayout>
+    );
+  }
 
   const [formData, setFormData] = useState({
     name: '',

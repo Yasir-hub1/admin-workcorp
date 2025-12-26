@@ -52,6 +52,7 @@ import PermissionsPage from '../pages/permissions/PermissionsPage';
 import CreatePermissionPage from '../pages/permissions/CreatePermissionPage';
 import PermissionDetailPage from '../pages/permissions/PermissionDetailPage';
 import NotificationsPage from '../pages/NotificationsPage';
+import UnauthorizedPage from '../pages/UnauthorizedPage';
 import NotFoundPage from '../pages/NotFoundPage';
 import useAuthStore from '../store/authStore';
 import { useAuth } from '../hooks/useAuth';
@@ -90,6 +91,7 @@ export default function AppRouter() {
         path="/register"
         element={isAuthenticated && user ? <Navigate to="/dashboard" replace /> : <RegisterPage />}
       />
+      <Route path="/unauthorized" element={<UnauthorizedPage />} />
 
       {/* Protected Routes */}
       <Route
@@ -511,7 +513,7 @@ export default function AppRouter() {
       <Route
         path="/roles"
         element={
-          <PrivateRoute>
+          <PrivateRoute requiredPermission="roles.view">
             <RolesPage />
           </PrivateRoute>
         }
@@ -519,7 +521,7 @@ export default function AppRouter() {
       <Route
         path="/roles/create"
         element={
-          <PrivateRoute>
+          <PrivateRoute requiredPermission="roles.create">
             <CreateRolePage />
           </PrivateRoute>
         }
@@ -527,7 +529,7 @@ export default function AppRouter() {
       <Route
         path="/roles/:id/edit"
         element={
-          <PrivateRoute>
+          <PrivateRoute requiredPermission="roles.edit">
             <CreateRolePage />
           </PrivateRoute>
         }
@@ -535,7 +537,7 @@ export default function AppRouter() {
       <Route
         path="/roles/:id"
         element={
-          <PrivateRoute>
+          <PrivateRoute requiredPermission="roles.view">
             <RoleDetailPage />
           </PrivateRoute>
         }
@@ -543,7 +545,7 @@ export default function AppRouter() {
       <Route
         path="/permissions"
         element={
-          <PrivateRoute>
+          <PrivateRoute requiredPermission="permissions.view">
             <PermissionsPage />
           </PrivateRoute>
         }
@@ -551,7 +553,7 @@ export default function AppRouter() {
       <Route
         path="/permissions/create"
         element={
-          <PrivateRoute>
+          <PrivateRoute requiredPermission="permissions.create">
             <CreatePermissionPage />
           </PrivateRoute>
         }
@@ -559,7 +561,7 @@ export default function AppRouter() {
       <Route
         path="/permissions/:id/edit"
         element={
-          <PrivateRoute>
+          <PrivateRoute requiredPermission="permissions.edit">
             <CreatePermissionPage />
           </PrivateRoute>
         }
@@ -567,7 +569,7 @@ export default function AppRouter() {
       <Route
         path="/permissions/:id"
         element={
-          <PrivateRoute>
+          <PrivateRoute requiredPermission="permissions.view">
             <PermissionDetailPage />
           </PrivateRoute>
         }

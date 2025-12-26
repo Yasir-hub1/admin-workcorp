@@ -16,7 +16,15 @@ class NotificationController extends Controller
     public function index(Request $request): JsonResponse
     {
         $user = Auth::user();
-        $query = Notification::where('user_id', $user->id);
+        // Super Admin puede ver todas las notificaciones del sistema
+        if (method_exists($user, 'isSuperAdmin') && $user->isSuperAdmin()) {
+            $query = Notification::query()->with(['user:id,name,email']);
+            if ($request->filled('user_id')) {
+                $query->where('user_id', (int) $request->user_id);
+            }
+        } else {
+            $query = Notification::where('user_id', $user->id);
+        }
 
         // Filtros
         if ($request->has('is_read')) {
@@ -53,9 +61,17 @@ class NotificationController extends Controller
     public function unreadCount(): JsonResponse
     {
         $user = Auth::user();
-        $count = Notification::where('user_id', $user->id)
-            ->where('is_read', false)
-            ->count();
+        if (method_exists($user, 'isSuperAdmin') && $user->isSuperAdmin()) {
+            $query = Notification::where('is_read', false);
+            if (request()->filled('user_id')) {
+                $query->where('user_id', (int) request()->user_id);
+            }
+            $count = $query->count();
+        } else {
+            $count = Notification::where('user_id', $user->id)
+                ->where('is_read', false)
+                ->count();
+        }
 
         return response()->json([
             'success' => true,
@@ -70,7 +86,9 @@ class NotificationController extends Controller
      */
     public function markAsRead(Notification $notification): JsonResponse
     {
-        if ($notification->user_id !== Auth::id()) {
+        $user = Auth::user();
+        // Super Admin puede marcar como leída cualquier notificación (vista global)
+        if (!(method_exists($user, 'isSuperAdmin') && $user->isSuperAdmin()) && $notification->user_id !== Auth::id()) {
             return response()->json([
                 'success' => false,
                 'message' => 'No autorizado',
@@ -92,12 +110,24 @@ class NotificationController extends Controller
     public function markAllAsRead(): JsonResponse
     {
         $user = Auth::user();
-        Notification::where('user_id', $user->id)
-            ->where('is_read', false)
-            ->update([
+        if (method_exists($user, 'isSuperAdmin') && $user->isSuperAdmin()) {
+            $query = Notification::where('is_read', false);
+            // Opcional: permitir marcar por usuario específico
+            if (request()->filled('user_id')) {
+                $query->where('user_id', (int) request()->user_id);
+            }
+            $query->update([
                 'is_read' => true,
                 'read_at' => now(),
             ]);
+        } else {
+            Notification::where('user_id', $user->id)
+                ->where('is_read', false)
+                ->update([
+                    'is_read' => true,
+                    'read_at' => now(),
+                ]);
+        }
 
         return response()->json([
             'success' => true,

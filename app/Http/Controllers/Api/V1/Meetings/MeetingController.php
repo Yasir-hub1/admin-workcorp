@@ -127,6 +127,23 @@ class MeetingController extends Controller
 
             NotificationService::notifyMany($attendeeIds, 'meeting', $title, $message, $actionUrl, 'normal', $data);
             NotificationService::sendPushNotifications($attendeeIds, $title, $message, $actionUrl, $data);
+
+            // Admin debe recibir notificación de toda reunión creada
+            try {
+                $adminTitle = 'Reunión creada: ' . $validated['title'];
+                $adminMessage = "Se creó una reunión.\n"
+                    . "Título: {$validated['title']}\n"
+                    . "Organizador: {$organizerName}\n"
+                    . "Inicio: {$formattedStart}\n"
+                    . "Fin: {$formattedEnd}\n"
+                    . "Asistentes: " . count($attendeeIds);
+                NotificationService::notifySuperAdmins('meeting', $adminTitle, $adminMessage, $actionUrl, 'normal', $data);
+            } catch (\Throwable $e) {
+                \Log::error('Meeting create: notify super admins failed', [
+                    'meeting_id' => $meeting->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
         }
 
         return response()->json([

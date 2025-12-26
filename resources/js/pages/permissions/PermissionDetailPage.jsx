@@ -24,6 +24,7 @@ export default function PermissionDetailPage() {
   const queryClient = useQueryClient();
   const { isAuthenticated, user } = useAuthStore();
   const isSuperAdmin = useAuthStore((state) => state.isSuperAdmin);
+  const hasPermission = useAuthStore((state) => state.hasPermission);
 
   const [showDeleteModal, setShowDeleteModal] = useState(false);
 
@@ -41,8 +42,8 @@ export default function PermissionDetailPage() {
   const permission = permissionData;
 
   // Verificar permisos
-  const canEdit = permission && isSuperAdmin();
-  const canDelete = permission && isSuperAdmin() && (permission.roles_count === 0);
+  const canEdit = permission && (isSuperAdmin() || hasPermission('permissions.edit'));
+  const canDelete = permission && (isSuperAdmin() || hasPermission('permissions.delete')) && (permission.roles_count === 0);
 
   // Mutation para eliminar
   const deleteMutation = useMutation({

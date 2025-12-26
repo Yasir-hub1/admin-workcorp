@@ -138,6 +138,19 @@ class TicketController extends Controller
 
             NotificationService::notifyMany([$assignedId], 'ticket', $title, $message, $actionUrl, 'normal', $data);
             NotificationService::sendPushNotifications([$assignedId], $title, $message, $actionUrl, $data);
+
+            // Admin debe enterarse de todo ticket creado/asignado
+            $assignedName = $ticket->assignedTo?->name ?? ('Usuario #' . $assignedId);
+            $adminTitle = "Nuevo ticket creado: {$ticket->ticket_number}";
+            $adminMessage = "Se creó un ticket y fue asignado.\n"
+                . "Cliente: {$clientName}\n"
+                . "Título: {$ticket->title}\n"
+                . "Asignado a: {$assignedName}\n"
+                . "Prioridad: {$ticket->priority}\n"
+                . "Creado por: " . ($creator?->name ?? 'Sistema');
+            NotificationService::notifySuperAdmins('ticket', $adminTitle, $adminMessage, $actionUrl, 'normal', array_merge($data, [
+                'assigned_to' => $assignedId,
+            ]));
         } catch (\Throwable $e) {
             \Log::error('Ticket creation: notification to assigned support failed', [
                 'ticket_id' => $ticket->id,
@@ -240,6 +253,16 @@ class TicketController extends Controller
 
             NotificationService::notifyMany([$assignedId], 'ticket', $title, $message, $actionUrl, 'normal', $data);
             NotificationService::sendPushNotifications([$assignedId], $title, $message, $actionUrl, $data);
+
+            // Admin también debe recibir notificación de reasignación/asignación
+            $assignedName = $ticket->assignedTo?->name ?? ('Usuario #' . $assignedId);
+            $adminTitle = $previousAssignedTo ? "Ticket reasignado: {$ticket->ticket_number}" : "Ticket asignado: {$ticket->ticket_number}";
+            $adminMessage = "Se actualizó la asignación de un ticket.\n"
+                . "Cliente: {$clientName}\n"
+                . "Título: {$ticket->title}\n"
+                . "Asignado a: {$assignedName}\n"
+                . "Por: " . ($actor?->name ?? 'Sistema');
+            NotificationService::notifySuperAdmins('ticket', $adminTitle, $adminMessage, $actionUrl, 'normal', $data);
         } catch (\Throwable $e) {
             \Log::error('Ticket assign: notification to assigned support failed', [
                 'ticket_id' => $ticket->id,
@@ -297,6 +320,9 @@ class TicketController extends Controller
 
             NotificationService::notifyMany([$assignedId], 'ticket', $title, $message, $actionUrl, 'normal', $data);
             NotificationService::sendPushNotifications([$assignedId], $title, $message, $actionUrl, $data);
+
+            // Admin también recibe registro del reenvío (auditable)
+            NotificationService::notifySuperAdmins('ticket', $title, $message, $actionUrl, 'normal', $data);
         } catch (\Throwable $e) {
             \Log::error('Ticket resend push failed', [
                 'ticket_id' => $ticket->id,
