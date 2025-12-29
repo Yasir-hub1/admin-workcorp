@@ -51,10 +51,12 @@ class Client extends Model
         return $this->hasMany(ClientContact::class);
     }
 
+    // Servicios adquiridos por el cliente (Kardex)
     public function services(): HasMany
     {
-        return $this->hasMany(Service::class);
+        return $this->hasMany(ClientService::class);
     }
+
 
     public function tickets(): HasMany
     {

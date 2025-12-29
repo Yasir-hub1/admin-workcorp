@@ -26,6 +26,7 @@ import CreateSchedulePage from '../pages/attendance/CreateSchedulePage';
 import ScheduleDetailPage from '../pages/attendance/ScheduleDetailPage';
 import MeetingsPage from '../pages/meetings/MeetingsPage';
 import MeetingDetailPage from '../pages/meetings/MeetingDetailPage';
+import CreateMeetingPage from '../pages/meetings/CreateMeetingPage';
 import TicketsPage from '../pages/tickets/TicketsPage';
 import TicketDetailPage from '../pages/tickets/TicketDetailPage';
 import CreateTicketPage from '../pages/tickets/CreateTicketPage';
@@ -315,6 +316,14 @@ export default function AppRouter() {
         element={
           <PrivateRoute>
             <MeetingsPage />
+          </PrivateRoute>
+        }
+      />
+      <Route
+        path="/meetings/:id/edit"
+        element={
+          <PrivateRoute>
+            <CreateMeetingPage />
           </PrivateRoute>
         }
       />

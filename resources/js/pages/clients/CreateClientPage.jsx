@@ -10,6 +10,7 @@ import Input from '../../components/common/Input';
 import Textarea from '../../components/common/Textarea';
 import Select from '../../components/common/Select';
 import Loading from '../../components/common/Loading';
+import ValidationErrorModal from '../../components/common/ValidationErrorModal';
 import toast from 'react-hot-toast';
 import useAuthStore from '../../store/authStore';
 
@@ -42,6 +43,8 @@ export default function CreateClientPage() {
   });
 
   const [isFormInitialized, setIsFormInitialized] = useState(false);
+  const [showValidationModal, setShowValidationModal] = useState(false);
+  const [validationErrors, setValidationErrors] = useState({});
 
   // Obtener cliente si está en modo edición
   const { data: clientData, isLoading: loadingClient } = useQuery({
@@ -150,7 +153,33 @@ export default function CreateClientPage() {
       navigate(`/clients/${id}`);
     },
     onError: (error) => {
-      toast.error(error.response?.data?.message || 'Error al actualizar cliente');
+      const errors = error.response?.data?.errors || {};
+      const errorMessage = error.response?.data?.message;
+      
+      // Si hay errores de validación, mostrarlos en el modal
+      if (Object.keys(errors).length > 0) {
+        setValidationErrors(errors);
+        setShowValidationModal(true);
+        
+        // También mostrar un toast con un resumen
+        const errorFields = Object.keys(errors).map(field => {
+          const fieldNames = {
+            document_number: 'Número de Documento',
+            business_name: 'Razón Social / Nombre',
+            document_type: 'Tipo de Documento',
+            client_type: 'Tipo de Cliente',
+            status: 'Estado',
+          };
+          return fieldNames[field] || field;
+        }).join(', ');
+        
+        toast.error(`Por favor corrige los siguientes campos: ${errorFields}`, {
+          duration: 5000,
+        });
+      } else {
+        // Si no hay errores de validación, mostrar el mensaje general
+        toast.error(errorMessage || 'Error al actualizar cliente');
+      }
     },
   });
 
@@ -418,6 +447,17 @@ export default function CreateClientPage() {
             </div>
           </form>
         </Card>
+
+        {/* Modal de Errores de Validación */}
+        <ValidationErrorModal
+          open={showValidationModal}
+          onClose={() => {
+            setShowValidationModal(false);
+            setValidationErrors({});
+          }}
+          errors={validationErrors}
+          title="Errores de Validación"
+        />
       </div>
     </AppLayout>
   );

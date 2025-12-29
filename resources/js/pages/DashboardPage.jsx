@@ -15,6 +15,7 @@ import {
 
 export default function DashboardPage() {
   const { isSuperAdmin, isJefeArea, isPersonal, isAuthenticated, user } = useAuthStore();
+  const hasPermission = useAuthStore((state) => state.hasPermission);
 
   // Fetch statistics - only when authenticated
   const { data: assetsStats } = useQuery({
@@ -117,6 +118,16 @@ export default function DashboardPage() {
     }).format(value);
   };
 
+  const daysUntil = (dateStr) => {
+    if (!dateStr) return null;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const d = new Date(dateStr);
+    d.setHours(0, 0, 0, 0);
+    const diff = Math.round((d.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+    return diff;
+  };
+
   return (
     <AppLayout>
       <div className="space-y-6">
@@ -203,6 +214,88 @@ export default function DashboardPage() {
             </motion.div>
           ))}
         </div>
+
+        {/* Servicios por vencer (solo con permiso de recordatorio) */}
+        {(isSuperAdmin() || hasPermission('services.expiry-reminders')) &&
+          Array.isArray(servicesStats?.expiring_services) &&
+          servicesStats.expiring_services.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.35 }}
+            className="bg-white rounded-lg shadow-md p-6 border border-yellow-100"
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900">Servicios por vencer (próx. 15 días)</h2>
+                <p className="text-sm text-gray-500 mt-1">
+                  Recordatorio push se envía (si tienes permiso) 7 y 1 día antes.
+                </p>
+              </div>
+              <div className="text-sm text-gray-600">
+                Total por vencer: <span className="font-semibold">{servicesStats.expiring_soon || 0}</span>
+              </div>
+            </div>
+
+            <div className="mt-4 overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Servicio</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Cliente</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Vence</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Responsable</th>
+                    <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Acción</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {servicesStats.expiring_services.map((s) => {
+                    const clientName = s.client?.business_name || s.client?.legal_name || 'Cliente';
+                    const dueIn = daysUntil(s.end_date);
+                    const dueLabel = dueIn === null ? '-' : (dueIn <= 0 ? 'Hoy' : `${dueIn} día(s)`);
+                    return (
+                      <tr key={s.id} className="hover:bg-gray-50">
+                        <td className="px-4 py-3">
+                          <div className="text-sm font-medium text-gray-900">{s.name}</div>
+                          {s.contract_amount !== null && s.contract_amount !== undefined && (
+                            <div className="text-xs text-gray-500">Contrato: {formatCurrency(s.contract_amount)}</div>
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="text-sm text-gray-900">{clientName}</div>
+                          {s.client?.phone && (
+                            <div className="text-xs text-gray-500">Tel: {s.client.phone}</div>
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="text-sm text-gray-900">{s.end_date || '-'}</div>
+                          <div className={`text-xs ${dueIn !== null && dueIn <= 3 ? 'text-red-600 font-semibold' : 'text-gray-500'}`}>
+                            {dueLabel}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="text-sm text-gray-900">{s.assigned_user?.name || '-'}</div>
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          {s.client?.id ? (
+                            <button
+                              className="text-indigo-600 hover:text-indigo-800 text-sm font-medium"
+                              onClick={() => (window.location.href = `/clients/${s.client.id}?tab=kardex`)}
+                            >
+                              Ver cliente →
+                            </button>
+                          ) : (
+                            <span className="text-sm text-gray-400">-</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </motion.div>
+        )}
 
         {/* Quick Actions */}
         <motion.div

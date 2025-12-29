@@ -225,7 +225,7 @@ export default function CreateServicePage() {
                       <Input
                         label="Nueva Categoría *"
                         value={formData.customCategory || ''}
-                        onChange={(e) => setFormData({ ...formData, customCategory: e.target.value, category: e.target.value })}
+                        onChange={(e) => setFormData({ ...formData, customCategory: e.target.value })}
                         required
                         placeholder="Ingresa el nombre de la nueva categoría"
                       />

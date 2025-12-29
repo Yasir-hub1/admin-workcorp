@@ -105,9 +105,25 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
     textContent: '',
   });
   
+  const isShareModalSelector = (value) => {
+    if (!value || typeof value !== 'string') return false;
+    const v = value.toLowerCase();
+    // IMPORTANTE: NO interceptar genéricamente "modal" porque rompe modales reales (HeadlessUI/React)
+    // Solo proteger selectores/ids típicos del script share-modal.
+    return (
+      v.includes('share-modal') ||
+      v.includes('sharemodal') ||
+      v.includes('share_button') ||
+      v.includes('sharebutton') ||
+      v.includes('btnshare') ||
+      v.includes('share-btn') ||
+      v.includes('share_')
+    );
+  };
+
   document.querySelector = function(selector) {
     const element = originalQuerySelector.call(document, selector);
-    if (!element && (selector.includes('share') || selector.includes('modal'))) {
+    if (!element && isShareModalSelector(selector)) {
       console.warn(`[Share Modal] Element not found: ${selector}. Returning safe mock.`);
       return createSafeMock();
     }
@@ -116,7 +132,7 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
   
   document.getElementById = function(id) {
     const element = originalGetElementById.call(document, id);
-    if (!element && (id.includes('share') || id.includes('modal'))) {
+    if (!element && isShareModalSelector(id)) {
       console.warn(`[Share Modal] Element not found: ${id}. Returning safe mock.`);
       return createSafeMock();
     }
@@ -125,7 +141,7 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
   
   document.querySelectorAll = function(selector) {
     const elements = originalQuerySelectorAll.call(document, selector);
-    if (elements.length === 0 && (selector.includes('share') || selector.includes('modal'))) {
+    if (elements.length === 0 && isShareModalSelector(selector)) {
       console.warn(`[Share Modal] Elements not found: ${selector}. Returning empty NodeList.`);
       return document.createDocumentFragment().childNodes; // Retornar NodeList vacío
     }

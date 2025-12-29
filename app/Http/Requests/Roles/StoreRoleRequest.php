@@ -12,7 +12,10 @@ class StoreRoleRequest extends FormRequest
      */
     public function authorize(): bool
     {
-        return $this->user() && $this->user()->isSuperAdmin();
+        $user = $this->user();
+        if (!$user) return false;
+        // El middleware ya protege la ruta; aquí alineamos authorize con permisos
+        return $user->isSuperAdmin() || $user->hasPermission('roles.create');
     }
 
     /**
@@ -24,7 +27,6 @@ class StoreRoleRequest extends FormRequest
             'name' => 'required|string|max:255|unique:roles,name',
             'display_name' => 'required|string|max:255',
             'description' => 'nullable|string',
-            'level' => 'nullable|integer|min:1|max:3',
             'permissions' => 'nullable|array',
             'permissions.*' => 'exists:permissions,id',
         ];

@@ -234,5 +234,76 @@ class AssetController extends Controller
             ],
         ]);
     }
+
+    /**
+     * Generate a unique asset code.
+     */
+    public function generateCode(Request $request): JsonResponse
+    {
+        $prefix = 'AST';
+        $areaId = $request->input('area_id');
+        $category = $request->input('category');
+        
+        // Si hay área seleccionada, usar su código como prefijo
+        if ($areaId) {
+            $area = \App\Models\Area::find($areaId);
+            if ($area && $area->code) {
+                $prefix = strtoupper($area->code);
+            }
+        }
+
+        // Si hay categoría, usar sus iniciales
+        if ($category) {
+            $categoryWords = explode(' ', $category);
+            $categoryPrefix = '';
+            foreach ($categoryWords as $word) {
+                if (!empty($word)) {
+                    $categoryPrefix .= strtoupper(substr($word, 0, 1));
+                }
+            }
+            if (strlen($categoryPrefix) > 0 && strlen($categoryPrefix) <= 3) {
+                $prefix = $categoryPrefix;
+            }
+        }
+
+        // Buscar el último código con este prefijo
+        // Usar sintaxis compatible con PostgreSQL y MySQL
+        $dbDriver = \DB::connection()->getDriverName();
+        if ($dbDriver === 'pgsql') {
+            $lastAsset = Asset::where('code', 'like', $prefix . '-%')
+                ->orderByRaw('CAST(SUBSTRING(code, ' . (strlen($prefix) + 2) . ') AS INTEGER) DESC')
+                ->first();
+        } else {
+            $lastAsset = Asset::where('code', 'like', $prefix . '-%')
+                ->orderByRaw('CAST(SUBSTRING(code, ' . (strlen($prefix) + 2) . ') AS UNSIGNED) DESC')
+                ->first();
+        }
+
+        $nextNumber = 1;
+        if ($lastAsset && $lastAsset->code) {
+            // Extraer el número del último código
+            $parts = explode('-', $lastAsset->code);
+            if (count($parts) > 1 && is_numeric($parts[1])) {
+                $nextNumber = (int) $parts[1] + 1;
+            }
+        }
+
+        // Generar el nuevo código con padding de ceros (001, 002, etc.)
+        $code = $prefix . '-' . str_pad($nextNumber, 3, '0', STR_PAD_LEFT);
+
+        // Verificar que sea único
+        $counter = 1;
+        while (Asset::where('code', $code)->exists()) {
+            $code = $prefix . '-' . str_pad($nextNumber + $counter, 3, '0', STR_PAD_LEFT);
+            $counter++;
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'code' => $code,
+            ],
+        ]);
+    }
 }
 

@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Models\Meeting;
+use App\Models\Notification;
 use App\Services\NotificationService;
 use Carbon\Carbon;
 use Illuminate\Console\Command;
@@ -42,7 +43,10 @@ class SendMeetingReminders extends Command
             ->get();
 
         foreach ($meetingsOneDay as $meeting) {
-            $this->sendReminder($meeting, '1 día', 'alta');
+            if ($this->alreadySent($meeting->id, '1 día')) {
+                continue;
+            }
+            $this->sendReminder($meeting, '1 día', 'high');
             $totalReminders++;
         }
 
@@ -57,7 +61,10 @@ class SendMeetingReminders extends Command
             ->get();
 
         foreach ($meetingsOneHour as $meeting) {
-            $this->sendReminder($meeting, '1 hora', 'urgente');
+            if ($this->alreadySent($meeting->id, '1 hora')) {
+                continue;
+            }
+            $this->sendReminder($meeting, '1 hora', 'urgent');
             $totalReminders++;
         }
 
@@ -72,7 +79,10 @@ class SendMeetingReminders extends Command
             ->get();
 
         foreach ($meetingsFifteen as $meeting) {
-            $this->sendReminder($meeting, '15 minutos', 'urgente');
+            if ($this->alreadySent($meeting->id, '15 minutos')) {
+                continue;
+            }
+            $this->sendReminder($meeting, '15 minutos', 'urgent');
             $totalReminders++;
         }
         
@@ -119,6 +129,41 @@ class SendMeetingReminders extends Command
                     'reminder_time' => $timeBefore,
                 ]
             );
+            NotificationService::sendPushNotifications(
+                $attendees,
+                "Recordatorio: {$meeting->title}",
+                $message,
+                "/meetings/{$meeting->id}",
+                [
+                    'meeting_id' => $meeting->id,
+                    'reminder_time' => $timeBefore,
+                    'url' => "/meetings/{$meeting->id}",
+                ]
+            );
+
+            // Admin también recibe recordatorio (vista global)
+            NotificationService::notifySuperAdmins(
+                'meeting',
+                "Recordatorio: {$meeting->title}",
+                $message,
+                "/meetings/{$meeting->id}",
+                $priority,
+                [
+                    'meeting_id' => $meeting->id,
+                    'reminder_time' => $timeBefore,
+                ]
+            );
         }
+    }
+
+    private function alreadySent(int $meetingId, string $timeBefore): bool
+    {
+        // Evitar duplicados cuando el scheduler corre cada 5 min y la ventana es +/-5..10 min
+        return Notification::query()
+            ->where('type', 'meeting')
+            ->where('data->meeting_id', $meetingId)
+            ->where('data->reminder_time', $timeBefore)
+            ->where('created_at', '>=', now()->subMinutes(25))
+            ->exists();
     }
 }

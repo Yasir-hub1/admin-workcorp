@@ -9,6 +9,7 @@ import Button from '../../components/common/Button';
 import Table from '../../components/common/Table';
 import Pagination from '../../components/common/Pagination';
 import { downloadExcel } from '../../utils/downloadFile';
+import { formatDateTime } from '../../utils/formatters';
 import toast from 'react-hot-toast';
 
 export default function MeetingsReportPage() {
@@ -50,8 +51,32 @@ export default function MeetingsReportPage() {
     { key: 'title', header: 'Título' },
     { key: 'status', header: 'Estado' },
     { key: 'meeting_type', header: 'Tipo' },
-    { key: 'start_time', header: 'Inicio' },
-    { key: 'end_time', header: 'Fin' },
+    {
+      key: 'start_time',
+      header: 'Inicio',
+      render: (value) => {
+        if (!value) return <span className="text-sm text-gray-500">-</span>;
+        try {
+          return <span className="text-sm text-gray-900">{formatDateTime(value)}</span>;
+        } catch (error) {
+          console.error('Error formatting start_time:', error, value);
+          return <span className="text-sm text-gray-500">-</span>;
+        }
+      },
+    },
+    {
+      key: 'end_time',
+      header: 'Fin',
+      render: (value) => {
+        if (!value) return <span className="text-sm text-gray-500">-</span>;
+        try {
+          return <span className="text-sm text-gray-900">{formatDateTime(value)}</span>;
+        } catch (error) {
+          console.error('Error formatting end_time:', error, value);
+          return <span className="text-sm text-gray-500">-</span>;
+        }
+      },
+    },
     { key: 'location', header: 'Lugar' },
     { key: 'organizer', header: 'Organizador', render: (_, row) => row.organizer?.name || '-' },
     { key: 'area', header: 'Área', render: (_, row) => row.area?.name || '-' },

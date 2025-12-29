@@ -38,6 +38,8 @@ function ChartCard({ title, children }) {
 export default function StatisticsDashboardPage() {
   const isSuperAdmin = useAuthStore((s) => s.isSuperAdmin);
   const isJefeArea = useAuthStore((s) => s.isJefeArea);
+  const hasPermission = useAuthStore((s) => s.hasPermission);
+  const { isAuthenticated, user } = useAuthStore();
 
   const [filters, setFilters] = useState(() => {
     const end = new Date();
@@ -51,10 +53,23 @@ export default function StatisticsDashboardPage() {
 
   const params = useMemo(() => ({ ...filters }), [filters]);
 
+  const canView = isSuperAdmin() || isJefeArea() || hasPermission('statistics.view');
+
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['statistics', 'overview', params],
-    queryFn: async () => (await apiClient.get('/statistics/overview', { params })).data.data,
-    enabled: isSuperAdmin() || isJefeArea(),
+    queryFn: async () => {
+      try {
+        const response = await apiClient.get('/statistics/overview', { params });
+        console.log('Statistics response:', response.data);
+        return response.data.data;
+      } catch (err) {
+        console.error('Error fetching statistics:', err);
+        console.error('Error response:', err.response?.data);
+        throw err;
+      }
+    },
+    enabled: canView && isAuthenticated && !!user,
+    retry: 1,
   });
 
   const kpis = data?.kpis || {};
@@ -66,7 +81,7 @@ export default function StatisticsDashboardPage() {
   const expensesByStatus = data?.expenses_by_status || [];
   const trend = data?.trend || [];
 
-  if (!(isSuperAdmin() || isJefeArea())) {
+  if (!canView) {
     return (
       <AppLayout>
         <Card>
@@ -122,7 +137,26 @@ export default function StatisticsDashboardPage() {
 
         {error && (
           <Card>
-            <div className="text-sm text-red-600">No se pudo cargar estadísticas.</div>
+            <div className="space-y-2">
+              <div className="text-sm font-semibold text-red-600">Error al cargar estadísticas</div>
+              <div className="text-sm text-red-500">
+                {error.response?.data?.message || error.message || 'No se pudo cargar estadísticas.'}
+              </div>
+              {error.response?.status === 403 && (
+                <div className="text-xs text-gray-500 mt-1">
+                  No tienes permisos para ver estadísticas. Verifica que tengas el permiso 'statistics.view'.
+                </div>
+              )}
+            </div>
+          </Card>
+        )}
+
+        {isLoading && (
+          <Card>
+            <div className="flex items-center justify-center py-8">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600" />
+              <span className="ml-3 text-sm text-gray-500">Cargando estadísticas...</span>
+            </div>
           </Card>
         )}
 

@@ -40,8 +40,11 @@ class TicketController extends Controller
         if ($user->isSuperAdmin()) {
             // Super Admin ve todos los tickets - no aplicar filtros de usuario
         } elseif ($user->hasRole('personal')) {
-            // Personal solo ve sus tickets
-            $query->where('created_by', $user->id);
+            // Personal ve tickets creados por él o asignados a él (soporte)
+            $query->where(function ($q) use ($user) {
+                $q->where('created_by', $user->id)
+                  ->orWhere('assigned_to', $user->id);
+            });
         } elseif ($user->hasRole('jefe_area') && $user->area_id) {
             // Jefe de área ve tickets de su área
             $query->where('area_id', $user->area_id);
@@ -182,8 +185,8 @@ class TicketController extends Controller
         if ($user->isSuperAdmin()) {
             // Super Admin puede ver todo - no hacer ninguna verificación adicional
         } elseif ($user->hasRole('personal')) {
-            // Personal solo puede ver sus tickets
-            if ($ticket->created_by !== $user->id) {
+            // Personal puede ver tickets creados por él o asignados a él
+            if ($ticket->created_by !== $user->id && (int) $ticket->assigned_to !== (int) $user->id) {
                 return response()->json([
                     'success' => false,
                     'message' => 'No autorizado',

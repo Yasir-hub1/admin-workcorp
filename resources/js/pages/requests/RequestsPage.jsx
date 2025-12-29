@@ -11,7 +11,7 @@ import Badge from '../../components/common/Badge';
 import Select from '../../components/common/Select';
 import Pagination from '../../components/common/Pagination';
 import EmptyState from '../../components/common/EmptyState';
-import { formatDate } from '../../utils/formatters';
+import { formatDate, calculateDaysBetween } from '../../utils/formatters';
 import { getStatusColor, getStatusLabel } from '../../utils/helpers';
 import useAuthStore from '../../store/authStore';
 
@@ -67,23 +67,40 @@ export default function RequestsPage() {
     {
       key: 'start_date',
       header: 'Fecha Inicio',
-      render: (value) => (
-        <span className="text-sm text-gray-900">{formatDate(value)}</span>
-      ),
+      render: (value) => {
+        if (!value) return <span className="text-sm text-gray-500">-</span>;
+        try {
+          return <span className="text-sm text-gray-900">{formatDate(value)}</span>;
+        } catch (error) {
+          console.error('Error formatting start_date:', error, value);
+          return <span className="text-sm text-gray-500">-</span>;
+        }
+      },
     },
     {
       key: 'end_date',
       header: 'Fecha Fin',
-      render: (value) => (
-        <span className="text-sm text-gray-900">{value ? formatDate(value) : '-'}</span>
-      ),
+      render: (value) => {
+        if (!value) return <span className="text-sm text-gray-500">-</span>;
+        try {
+          return <span className="text-sm text-gray-900">{formatDate(value)}</span>;
+        } catch (error) {
+          console.error('Error formatting end_date:', error, value);
+          return <span className="text-sm text-gray-500">-</span>;
+        }
+      },
     },
     {
       key: 'days_requested',
       header: 'Días',
-      render: (value) => (
-        <span className="text-sm text-gray-900">{value || '-'}</span>
-      ),
+      render: (value, row) => {
+        // Si no hay días solicitados pero hay fechas, calcular
+        if (!value && row.start_date) {
+          const days = calculateDaysBetween(row.start_date, row.end_date);
+          return <span className="text-sm text-gray-900">{days}</span>;
+        }
+        return <span className="text-sm text-gray-900">{value || '-'}</span>;
+      },
     },
     {
       key: 'status',

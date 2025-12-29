@@ -80,12 +80,20 @@ export default function CreateUserPage() {
     enabled: isAuthenticated && !!user && isEditMode,
   });
 
-  // Obtener roles disponibles
-  const rolesOptions = [
-    { value: 'super_admin', label: 'Super Admin' },
-    { value: 'jefe_area', label: 'Jefe de Área' },
-    { value: 'personal', label: 'Personal' },
-  ];
+  // Obtener roles disponibles (dinámico)
+  const { data: rolesData } = useQuery({
+    queryKey: ['roles-for-users'],
+    queryFn: async () => {
+      const response = await apiClient.get('/roles', { params: { per_page: 1000 } });
+      return response.data.data || [];
+    },
+    enabled: isAuthenticated && !!user,
+  });
+
+  const rolesOptions = (rolesData || []).map((r) => ({
+    value: r.name,
+    label: r.display_name || r.name,
+  }));
 
   // Inicializar formulario con datos del usuario
   useEffect(() => {

@@ -23,6 +23,7 @@ import Modal from '../../components/common/Modal';
 import Textarea from '../../components/common/Textarea';
 import { formatDate, formatDateTime } from '../../utils/formatters';
 import toast from 'react-hot-toast';
+import { playNotificationSound } from '../../utils/notificationSound';
 import useAuthStore from '../../store/authStore';
 import Select from '../../components/common/Select';
 
@@ -155,6 +156,7 @@ export default function TicketDetailPage() {
     },
     onSuccess: () => {
       toast.success('Notificación push reenviada');
+      playNotificationSound({ frequency: 740, durationMs: 110 });
     },
     onError: (error) => {
       toast.error(error.response?.data?.message || 'Error al reenviar notificación');

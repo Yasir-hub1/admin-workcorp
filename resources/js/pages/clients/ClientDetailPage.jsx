@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useEffect, useMemo, useState } from 'react';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
   ArrowLeftIcon,
   PencilIcon,
@@ -34,12 +34,19 @@ import useAuthStore from '../../store/authStore';
 export default function ClientDetailPage() {
   const navigate = useNavigate();
   const { id } = useParams();
+  const [searchParams] = useSearchParams();
   const queryClient = useQueryClient();
   const { isAuthenticated, user } = useAuthStore();
   const isSuperAdmin = useAuthStore((state) => state.isSuperAdmin);
+  const hasPermission = useAuthStore((state) => state.hasPermission);
 
   const [showDeleteModal, setShowDeleteModal] = useState(false);
-  const [activeTab, setActiveTab] = useState('info'); // 'info', 'kardex' o 'services'
+  const initialTab = (() => {
+    const tab = (searchParams.get('tab') || '').toLowerCase();
+    if (tab === 'kardex') return 'kardex';
+    return 'info';
+  })();
+  const [activeTab, setActiveTab] = useState(initialTab); // 'info' o 'kardex'
   const [showServiceModal, setShowServiceModal] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [showRenewalModal, setShowRenewalModal] = useState(false);
@@ -69,20 +76,12 @@ export default function ClientDetailPage() {
       const response = await apiClient.get(`/clients/${id}/kardex`);
       return response.data.data;
     },
-    enabled: !!id && isAuthenticated && !!user && activeTab === 'kardex',
+    enabled: !!id && isAuthenticated && !!user && activeTab === 'kardex' && !!clientData && (isSuperAdmin() || hasPermission('clients.kardex.view') || hasPermission('clients.kardex')),
   });
 
-  // Obtener servicios del cliente
-  const { data: servicesData, isLoading: loadingServices, refetch: refetchServices } = useQuery({
-    queryKey: ['client-services', id],
-    queryFn: async () => {
-      const response = await apiClient.get('/services', {
-        params: { client_id: id, per_page: 100 },
-      });
-      return response.data.data || [];
-    },
-    enabled: !!id && isAuthenticated && !!user && (activeTab === 'services' || activeTab === 'kardex'),
-  });
+  const clientServices = useMemo(() => {
+    return kardexData?.client_services || [];
+  }, [kardexData]);
 
   // Obtener áreas y usuarios para el formulario
   const { data: areasData } = useQuery({
@@ -126,21 +125,12 @@ export default function ClientDetailPage() {
   });
 
 
-  // Obtener categorías únicas de servicios existentes
-  const { data: existingCategoriesData } = useQuery({
-    queryKey: ['existing-services-categories'],
+  // Servicios del catálogo (para agregar al kardex)
+  const { data: catalogServicesData } = useQuery({
+    queryKey: ['services-catalog-for-kardex'],
     queryFn: async () => {
-      try {
-        const response = await apiClient.get('/services', {
-          params: { per_page: 1000 },
-        });
-        const services = response.data.data || [];
-        const uniqueCategories = [...new Set(services.map(s => s.category).filter(Boolean))];
-        return uniqueCategories.sort();
-      } catch (error) {
-        console.error('Error obteniendo categorías existentes:', error);
-        return [];
-      }
+      const response = await apiClient.get('/services', { params: { per_page: 1000 } });
+      return response.data.data || [];
     },
     enabled: isAuthenticated && !!user && showServiceModal,
   });
@@ -150,8 +140,11 @@ export default function ClientDetailPage() {
   const summary = kardexData?.summary || {};
 
   // Verificar permisos
-  const canEdit = client && isSuperAdmin();
-  const canDelete = client && isSuperAdmin();
+  const canViewKardex = client && (isSuperAdmin() || hasPermission('clients.kardex.view') || hasPermission('clients.kardex'));
+  const canCreateKardex = client && (isSuperAdmin() || hasPermission('clients.kardex.create'));
+  // Importante: "Servicios" es catálogo independiente. Aquí solo gestionamos Kardex (servicios adquiridos).
+  const canEdit = client && (isSuperAdmin() || hasPermission('clients.edit')); // cliente
+  const canDelete = client && (isSuperAdmin() || hasPermission('clients.delete'));
 
   // Mapear estados del backend al frontend
   const getMappedStatus = (status) => {
@@ -171,16 +164,9 @@ export default function ClientDetailPage() {
     return `https://wa.me/${digits}${text ? `?text=${text}` : ''}`;
   };
 
-  // Service form states
+  // Kardex: registrar servicio adquirido (selecciona servicio del catálogo + datos de contrato)
   const [serviceFormData, setServiceFormData] = useState({
-    name: '',
-    code: '',
-    description: '',
-    category: '',
-    customCategory: '',
-    price: '',
-    billing_type: 'monthly',
-    standard_duration: '',
+    service_id: '',
     start_date: '',
     end_date: '',
     contract_duration_months: '',
@@ -190,7 +176,27 @@ export default function ClientDetailPage() {
     billing_day: '',
     area_id: client?.area?.id?.toString() || '',
     assigned_to: '',
+    notes: '',
   });
+
+  // Inicializar formulario cuando se abre el modal de Kardex
+  useEffect(() => {
+    if (!showServiceModal) return;
+
+    setServiceFormData({
+      service_id: '',
+      start_date: '',
+      end_date: '',
+      contract_duration_months: '',
+      contract_amount: '',
+      payment_frequency: 'monthly',
+      auto_renewal: false,
+      billing_day: '',
+      area_id: client?.area?.id?.toString() || '',
+      assigned_to: '',
+      notes: '',
+    });
+  }, [showServiceModal, client?.area?.id]);
 
   const [paymentFormData, setPaymentFormData] = useState({
     payment_date: new Date().toISOString().split('T')[0],
@@ -228,29 +234,18 @@ export default function ClientDetailPage() {
     },
   });
 
+  // Agregar servicio del catálogo al Kardex del cliente
   const createServiceMutation = useMutation({
     mutationFn: async (data) => {
-      const response = await apiClient.post('/services', {
-        ...data,
-        client_id: parseInt(id),
-        status: 'active',
-      });
+      const response = await apiClient.post(`/clients/${id}/kardex/services`, data);
       return response.data;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['client-services', id]);
       queryClient.invalidateQueries(['client-kardex', id]);
       toast.success('Servicio creado correctamente');
       setShowServiceModal(false);
       setServiceFormData({
-        name: '',
-        code: '',
-        description: '',
-        category: '',
-        customCategory: '',
-        price: '',
-        billing_type: 'monthly',
-        standard_duration: '',
+        service_id: '',
         start_date: '',
         end_date: '',
         contract_duration_months: '',
@@ -260,6 +255,7 @@ export default function ClientDetailPage() {
         billing_day: '',
         area_id: client?.area?.id?.toString() || '',
         assigned_to: '',
+        notes: '',
       });
     },
     onError: (error) => {
@@ -267,30 +263,14 @@ export default function ClientDetailPage() {
     },
   });
 
-  const updateServiceMutation = useMutation({
-    mutationFn: async ({ serviceId, data }) => {
-      const response = await apiClient.put(`/services/${serviceId}`, data);
-      return response.data;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries(['client-services', id]);
-      queryClient.invalidateQueries(['client-kardex', id]);
-      toast.success('Servicio actualizado correctamente');
-      setShowServiceModal(false);
-      setSelectedService(null);
-    },
-    onError: (error) => {
-      toast.error(error.response?.data?.message || 'Error al actualizar servicio');
-    },
-  });
+  // Nota: edición del catálogo se hace en /services, no desde cliente.
 
   const paymentMutation = useMutation({
     mutationFn: async ({ serviceId, data }) => {
-      const response = await apiClient.post(`/services/${serviceId}/payment`, data);
+      const response = await apiClient.post(`/client-services/${serviceId}/payment`, data);
       return response.data;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['client-services', id]);
       queryClient.invalidateQueries(['client-kardex', id]);
       toast.success('Pago registrado correctamente');
       setShowPaymentModal(false);
@@ -310,11 +290,10 @@ export default function ClientDetailPage() {
 
   const renewalMutation = useMutation({
     mutationFn: async ({ serviceId, data }) => {
-      const response = await apiClient.post(`/services/${serviceId}/renew`, data);
+      const response = await apiClient.post(`/client-services/${serviceId}/renew`, data);
       return response.data;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['client-services', id]);
       queryClient.invalidateQueries(['client-kardex', id]);
       toast.success('Servicio renovado correctamente');
       setShowRenewalModal(false);
@@ -332,11 +311,10 @@ export default function ClientDetailPage() {
 
   const incidentMutation = useMutation({
     mutationFn: async ({ serviceId, data }) => {
-      const response = await apiClient.post(`/services/${serviceId}/incident`, data);
+      const response = await apiClient.post(`/client-services/${serviceId}/incident`, data);
       return response.data;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['client-services', id]);
       queryClient.invalidateQueries(['client-kardex', id]);
       toast.success('Incidencia registrada correctamente');
       setShowIncidentModal(false);
@@ -486,21 +464,24 @@ export default function ClientDetailPage() {
             >
               Información
             </button>
-            <button
-              onClick={() => setActiveTab('kardex')}
-              className={`${
-                activeTab === 'kardex'
-                  ? 'border-indigo-500 text-indigo-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              } whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm`}
-            >
-              Kardex
-              {summary.total_services > 0 && (
-                <span className="ml-2 bg-gray-100 text-gray-600 py-0.5 px-2 rounded-full text-xs">
-                  {summary.total_services}
-                </span>
-              )}
-            </button>
+            {canViewKardex && (
+              <button
+                onClick={() => setActiveTab('kardex')}
+                className={`${
+                  activeTab === 'kardex'
+                    ? 'border-indigo-500 text-indigo-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                } whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm`}
+              >
+                Kardex
+                {(summary?.total_services || 0) > 0 && (
+                  <span className="ml-2 bg-gray-100 text-gray-600 py-0.5 px-2 rounded-full text-xs">
+                    {summary.total_services}
+                  </span>
+                )}
+              </button>
+            )}
+            {/* Servicios del cliente se gestionan vía Kardex (servicios adquiridos) */}
           </nav>
         </div>
 
@@ -749,7 +730,7 @@ export default function ClientDetailPage() {
           </div>
         ) : activeTab === 'kardex' ? (
           <div className="space-y-6">
-            {/* Header con botón para registrar servicio */}
+            {/* Header con botón para agregar servicio adquirido (Kardex) */}
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
               <div>
                 <h2 className="text-xl font-semibold text-gray-900">Kardex del Cliente</h2>
@@ -757,15 +738,14 @@ export default function ClientDetailPage() {
                   Historial completo de servicios, pagos, renovaciones e incidencias
                 </p>
               </div>
-              {canEdit && (
+              {canCreateKardex && (
                 <Button
                   onClick={() => {
-                    setSelectedService(null);
                     setShowServiceModal(true);
                   }}
                   icon={PlusIcon}
                 >
-                  Registrar Nuevo Servicio
+                  Agregar servicio (Kardex)
                 </Button>
               )}
             </div>
@@ -788,8 +768,16 @@ export default function ClientDetailPage() {
                   <div className="flex items-center">
                     <CheckCircleIcon className="h-8 w-8 text-green-400" />
                     <div className="ml-4">
-                      <p className="text-xs font-medium text-gray-500">Activos</p>
-                      <p className="text-lg font-semibold text-gray-900">{summary.active_services || 0}</p>
+                      <p className="text-xs font-medium text-gray-500">Estado</p>
+                      <p className="text-lg font-semibold text-gray-900">{summary.active_services || 0} activos</p>
+                      <div className="mt-1 flex flex-wrap gap-2 text-[11px]">
+                        <span className="px-2 py-0.5 rounded-full bg-yellow-50 text-yellow-800 border border-yellow-200">
+                          {summary.expiring_services || 0} por vencer
+                        </span>
+                        <span className="px-2 py-0.5 rounded-full bg-red-50 text-red-800 border border-red-200">
+                          {summary.expired_services || 0} vencidos
+                        </span>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -799,10 +787,13 @@ export default function ClientDetailPage() {
                   <div className="flex items-center">
                     <CurrencyDollarIcon className="h-8 w-8 text-indigo-400" />
                     <div className="ml-4">
-                      <p className="text-xs font-medium text-gray-500">Total Pagos</p>
+                      <p className="text-xs font-medium text-gray-500">Cobros</p>
                       <p className="text-lg font-semibold text-gray-900">
                         {formatCurrency(summary.total_payments || 0)}
                       </p>
+                      <div className="text-[11px] text-gray-500 mt-1">
+                        Contratos: <span className="font-semibold text-gray-700">{formatCurrency(summary.total_contract_amount || 0)}</span>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -846,6 +837,7 @@ export default function ClientDetailPage() {
                   {kardex.map((entry, index) => {
                     const Icon = getKardexIcon(entry.type);
                     const iconColor = getKardexColor(entry.type);
+                    const service = entry.service || null;
                     return (
                       <div key={index} className="flex items-start gap-4 pb-4 border-b border-gray-200 last:border-0">
                         <div className={`flex-shrink-0 ${iconColor}`}>
@@ -858,10 +850,27 @@ export default function ClientDetailPage() {
                                 {getKardexLabel(entry.type)}
                               </p>
                               <p className="text-sm text-gray-600 mt-1">{entry.description}</p>
-                              {entry.service && (
-                                <p className="text-xs text-gray-500 mt-1">
-                                  Servicio: {entry.service.name}
-                                </p>
+                              {service?.name && (
+                                <div className="mt-2 flex flex-wrap items-center gap-2">
+                                  <span className="text-xs text-gray-700">
+                                    Servicio: <span className="font-semibold">{service.name}</span>
+                                  </span>
+                                  {service.status && (
+                                    <span className={`text-[11px] px-2 py-0.5 rounded-full ${getStatusColor(service.status)}`}>
+                                      {getStatusLabel(service.status)}
+                                    </span>
+                                  )}
+                                  {service.assigned_user?.name && (
+                                    <span className="text-[11px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-700">
+                                      Resp: {service.assigned_user.name}
+                                    </span>
+                                  )}
+                                  {service.area?.name && (
+                                    <span className="text-[11px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-700">
+                                      Área: {service.area.name}
+                                    </span>
+                                  )}
+                                </div>
                               )}
                             </div>
                             <div className="text-right">
@@ -877,6 +886,21 @@ export default function ClientDetailPage() {
                               )}
                             </div>
                           </div>
+                          {(service?.start_date || service?.end_date || service?.payment_frequency || service?.contract_amount) && (
+                            <div className="mt-2 text-xs text-gray-600 flex flex-wrap gap-x-4 gap-y-1">
+                              {(service.start_date || service.end_date) && (
+                                <span className="font-mono">
+                                  {service.start_date || '—'} → {service.end_date || '—'}
+                                </span>
+                              )}
+                              {service.payment_frequency && (
+                                <span>Frecuencia: <span className="font-semibold">{service.payment_frequency}</span></span>
+                              )}
+                              {service.contract_amount !== null && service.contract_amount !== undefined && (
+                                <span>Contrato: <span className="font-semibold">{formatCurrency(service.contract_amount)}</span></span>
+                              )}
+                            </div>
+                          )}
                           {entry.payment_method && (
                             <p className="text-xs text-gray-500 mt-1">
                               Método: {entry.payment_method}
@@ -914,185 +938,77 @@ export default function ClientDetailPage() {
                 </div>
               )}
             </Card>
-          </div>
-        ) : activeTab === 'services' ? (
-          <div className="space-y-6">
-            {/* Services Header */}
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-              <div>
-                <h2 className="text-xl font-semibold text-gray-900">Servicios del Cliente</h2>
-                <p className="text-sm text-gray-500 mt-1">
-                  Gestiona los servicios contratados por {client.business_name || client.full_name}
-                </p>
-              </div>
-              {canEdit && (
-                <Button
-                  onClick={() => {
-                    setSelectedService(null);
-                    setShowServiceModal(true);
-                  }}
-                  icon={PlusIcon}
-                >
-                  Nuevo Servicio
-                </Button>
-              )}
-            </div>
 
-            {/* Services List */}
-            {loadingServices ? (
-              <div className="flex items-center justify-center py-12">
-                <Loading />
-              </div>
-            ) : !servicesData || servicesData.length === 0 ? (
-              <Card>
-                <div className="text-center py-12">
-                  <DocumentTextIcon className="mx-auto h-12 w-12 text-gray-400" />
-                  <h3 className="mt-2 text-sm font-medium text-gray-900">No hay servicios</h3>
-                  <p className="mt-1 text-sm text-gray-500">
-                    Comienza registrando el primer servicio para este cliente
-                  </p>
-                  {canEdit && (
-                    <div className="mt-6">
-                      <Button
-                        onClick={() => {
-                          setSelectedService(null);
-                          setShowServiceModal(true);
-                        }}
-                        icon={PlusIcon}
-                      >
-                        Nuevo Servicio
-                      </Button>
-                    </div>
-                  )}
-                </div>
-              </Card>
-            ) : (
-              <div className="grid grid-cols-1 gap-4">
-                {servicesData.map((service) => (
-                  <Card key={service.id} padding={false}>
-                    <div className="p-6">
-                      <div className="flex items-start justify-between">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-3">
-                            <h3 className="text-lg font-semibold text-gray-900">{service.name}</h3>
-                            <Badge className={getStatusColor(service.status)}>
-                              {getStatusLabel(service.status)}
-                            </Badge>
-                            {service.is_expiring && (
-                              <Badge variant="warning">Por Vencer</Badge>
-                            )}
-                            {service.is_expired && (
-                              <Badge variant="danger">Vencido</Badge>
-                            )}
-                          </div>
-                          {service.description && (
-                            <p className="mt-2 text-sm text-gray-600">{service.description}</p>
-                          )}
-                          <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
-                            <div>
-                              <span className="text-gray-500">Monto:</span>
-                              <p className="font-semibold text-gray-900">
-                                {formatCurrency(service.contract_amount || 0)}
-                              </p>
-                            </div>
-                            <div>
-                              <span className="text-gray-500">Inicio:</span>
-                              <p className="font-medium text-gray-900">
-                                {service.start_date ? formatDate(service.start_date) : '-'}
-                              </p>
-                            </div>
-                            <div>
-                              <span className="text-gray-500">Vencimiento:</span>
-                              <p className="font-medium text-gray-900">
-                                {service.end_date ? formatDate(service.end_date) : '-'}
-                              </p>
-                            </div>
-                            <div>
-                              <span className="text-gray-500">Frecuencia:</span>
-                              <p className="font-medium text-gray-900">
-                                {service.payment_frequency === 'monthly' ? 'Mensual' :
-                                 service.payment_frequency === 'quarterly' ? 'Trimestral' :
-                                 service.payment_frequency === 'annual' ? 'Anual' : 'Único'}
-                              </p>
-                            </div>
-                          </div>
-                          {service.assigned_user && (
-                            <div className="mt-3 text-sm">
-                              <span className="text-gray-500">Responsable: </span>
-                              <span className="text-gray-900">{service.assigned_user.name}</span>
-                            </div>
-                          )}
+            {/* Servicios adquiridos */}
+            <Card title={`Servicios adquiridos (${clientServices.length})`}>
+              {clientServices.length === 0 ? (
+                <div className="text-center py-10 text-gray-500">Este cliente aún no tiene servicios adquiridos.</div>
+              ) : (
+                <div className="space-y-3">
+                  {clientServices.map((cs) => (
+                    <div key={cs.id} className="p-4 rounded-lg border border-gray-200 bg-white flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="text-sm font-semibold text-gray-900 truncate">
+                          {cs.service?.name || 'Servicio'}
                         </div>
-                        <div className="ml-4 flex flex-col gap-2">
-                          {canEdit && (
-                            <>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => {
-                                  setSelectedService(service);
-                                  setShowServiceModal(true);
-                                }}
-                              >
-                                Editar
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => {
-                                  setSelectedService(service);
-                                  setShowPaymentModal(true);
-                                }}
-                              >
-                                Registrar Pago
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => {
-                                  setSelectedService(service);
-                                  setShowRenewalModal(true);
-                                }}
-                              >
-                                Renovar
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => {
-                                  setSelectedService(service);
-                                  setShowIncidentModal(true);
-                                }}
-                              >
-                                Reportar Incidencia
-                              </Button>
-                            </>
-                          )}
+                        <div className="text-xs text-gray-500 mt-1">
+                          {cs.start_date || '—'} → {cs.end_date || '—'}
+                          {cs.contract_amount !== null && cs.contract_amount !== undefined ? ` • ${formatCurrency(cs.contract_amount)}` : ''}
+                          {cs.payment_frequency ? ` • ${cs.payment_frequency}` : ''}
                         </div>
                       </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge className={getStatusColor(cs.status)}>{getStatusLabel(cs.status)}</Badge>
+                        {canCreateKardex && (
+                          <>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                setSelectedService(cs); // cs = client_service
+                                setShowPaymentModal(true);
+                              }}
+                            >
+                              Registrar Pago
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                setSelectedService(cs);
+                                setShowRenewalModal(true);
+                              }}
+                            >
+                              Renovar
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                setSelectedService(cs);
+                                setShowIncidentModal(true);
+                              }}
+                            >
+                              Incidencia
+                            </Button>
+                          </>
+                        )}
+                      </div>
                     </div>
-                  </Card>
-                ))}
-              </div>
-            )}
+                  ))}
+                </div>
+              )}
+            </Card>
           </div>
         ) : null}
 
-        {/* Service Modal */}
+        {/* Kardex: Agregar servicio del catálogo */}
         <Modal
           open={showServiceModal}
           onClose={() => {
             setShowServiceModal(false);
-            setSelectedService(null);
             setServiceFormData({
-              name: '',
-              code: '',
-              description: '',
-              category: '',
-              customCategory: '',
-              price: '',
-              billing_type: 'monthly',
-              standard_duration: '',
+              service_id: '',
               start_date: '',
               end_date: '',
               contract_duration_months: '',
@@ -1102,201 +1018,92 @@ export default function ClientDetailPage() {
               billing_day: '',
               area_id: client?.area?.id?.toString() || '',
               assigned_to: '',
+              notes: '',
             });
           }}
-          title={selectedService ? 'Editar Servicio' : 'Registrar Nuevo Servicio'}
+          title="Agregar servicio al Kardex"
           size="lg"
           footer={
             <>
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setShowServiceModal(false);
-                  setSelectedService(null);
-                }}
-              >
+              <Button variant="outline" onClick={() => setShowServiceModal(false)}>
                 Cancelar
               </Button>
               <Button
                 onClick={() => {
-                  if (!serviceFormData.name || serviceFormData.name.trim() === '') {
-                    toast.error('El nombre del servicio es requerido');
+                  if (!serviceFormData.service_id) {
+                    toast.error('Selecciona un servicio del catálogo');
                     return;
                   }
 
-                  // Si se seleccionó "Crear nueva categoría", usar el customCategory
-                  const serviceCategory = serviceFormData.category === '__custom__'
-                    ? serviceFormData.customCategory
-                    : serviceFormData.category;
-
                   const submitData = {
-                    ...serviceFormData,
-                    name: serviceFormData.name.trim(),
-                    category: serviceCategory,
-                    price: serviceFormData.price ? parseFloat(serviceFormData.price) : null,
-                    standard_duration: serviceFormData.standard_duration ? parseInt(serviceFormData.standard_duration) : null,
+                    service_id: parseInt(serviceFormData.service_id),
+                    start_date: serviceFormData.start_date || null,
+                    end_date: serviceFormData.end_date || null,
                     contract_duration_months: serviceFormData.contract_duration_months ? parseInt(serviceFormData.contract_duration_months) : null,
-                    contract_amount: parseFloat(serviceFormData.contract_amount),
+                    contract_amount: serviceFormData.contract_amount ? parseFloat(serviceFormData.contract_amount) : null,
+                    payment_frequency: serviceFormData.payment_frequency || 'monthly',
+                    auto_renewal: !!serviceFormData.auto_renewal,
                     billing_day: serviceFormData.billing_day ? parseInt(serviceFormData.billing_day) : null,
                     area_id: serviceFormData.area_id ? parseInt(serviceFormData.area_id) : null,
                     assigned_to: serviceFormData.assigned_to ? parseInt(serviceFormData.assigned_to) : null,
+                    notes: serviceFormData.notes || null,
                   };
 
-                  // Eliminar campos que no se deben enviar
-                  delete submitData.customCategory;
-
-                  // Limpiar campos vacíos
-                  Object.keys(submitData).forEach(key => {
-                    if (submitData[key] === '' || submitData[key] === null || submitData[key] === undefined) {
-                      delete submitData[key];
+                  Object.keys(submitData).forEach((k) => {
+                    if (submitData[k] === null || submitData[k] === '' || submitData[k] === undefined) {
+                      delete submitData[k];
                     }
                   });
 
-                  if (selectedService) {
-                    updateServiceMutation.mutate({
-                      serviceId: selectedService.id,
-                      data: submitData,
-                    });
-                  } else {
-                    createServiceMutation.mutate(submitData);
-                  }
+                  createServiceMutation.mutate(submitData);
                 }}
-                loading={createServiceMutation.isPending || updateServiceMutation.isPending}
+                loading={createServiceMutation.isPending}
               >
-                {selectedService ? 'Actualizar' : 'Registrar Servicio'}
+                Agregar
               </Button>
             </>
           }
         >
           <div className="space-y-4">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <Input
-                label="Nombre del Servicio *"
-                value={serviceFormData.name}
-                onChange={(e) => setServiceFormData({ ...serviceFormData, name: e.target.value })}
-                required
-                placeholder="Ingresa el nombre del servicio"
-              />
-              <Input
-                label="Código/SKU"
-                value={serviceFormData.code}
-                onChange={(e) => setServiceFormData({ ...serviceFormData, code: e.target.value })}
-                placeholder="Código único del servicio"
-              />
-            </div>
-            <Textarea
-              label="Descripción"
-              value={serviceFormData.description}
-              onChange={(e) => setServiceFormData({ ...serviceFormData, description: e.target.value })}
-              rows={3}
-              placeholder="Descripción detallada del servicio"
+            <Select
+              label="Servicio del catálogo *"
+              value={serviceFormData.service_id}
+              onChange={(e) => setServiceFormData({ ...serviceFormData, service_id: e.target.value })}
+              options={[
+                { value: '', label: 'Seleccionar servicio…' },
+                ...(catalogServicesData || []).map((s) => ({
+                  value: String(s.id),
+                  label: `${s.name}${s.category ? ` • ${s.category}` : ''}${s.code ? ` • ${s.code}` : ''}`,
+                })),
+              ]}
             />
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <Select
-                  label="Categoría"
-                  value={serviceFormData.category}
-                  onChange={(e) => {
-                    const selectedCategory = e.target.value;
-                    setServiceFormData({
-                      ...serviceFormData,
-                      category: selectedCategory,
-                      customCategory: selectedCategory === '__custom__' ? serviceFormData.customCategory : '',
-                    });
-                  }}
-                  options={[
-                    { value: '', label: 'Seleccionar categoría...' },
-                    ...(existingCategoriesData?.map(category => ({
-                      value: category,
-                      label: category,
-                    })) || []),
-                    { value: '__custom__', label: '➕ Crear nueva categoría' },
-                  ]}
-                />
-                {serviceFormData.category === '__custom__' && (
-                  <div className="mt-2">
-                    <Input
-                      label="Nueva Categoría *"
-                      value={serviceFormData.customCategory || ''}
-                      onChange={(e) => {
-                        setServiceFormData({
-                          ...serviceFormData,
-                          customCategory: e.target.value,
-                          category: e.target.value,
-                        });
-                      }}
-                      required
-                      placeholder="Ingresa el nombre de la nueva categoría"
-                    />
-                  </div>
-                )}
-              </div>
-              <Input
-                label="Precio Unitario"
-                type="number"
-                step="0.01"
-                value={serviceFormData.price}
-                onChange={(e) => setServiceFormData({ ...serviceFormData, price: e.target.value })}
-                placeholder="0.00"
-              />
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <Select
-                label="Tipo de Facturación *"
-                value={serviceFormData.billing_type}
-                onChange={(e) => setServiceFormData({ ...serviceFormData, billing_type: e.target.value })}
-                options={[
-                  { value: 'monthly', label: 'Mensual' },
-                  { value: 'annual', label: 'Anual' },
-                  { value: 'project', label: 'Por Proyecto' },
-                  { value: 'hourly', label: 'Por Hora' },
-                ]}
-              />
-              <Input
-                label="Duración Estándar (horas/días)"
-                type="number"
-                value={serviceFormData.standard_duration}
-                onChange={(e) => setServiceFormData({ ...serviceFormData, standard_duration: e.target.value })}
-                placeholder="Ej: 40 horas, 30 días"
-              />
-            </div>
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <Input
-                label="Fecha de Inicio *"
+                label="Fecha de Inicio"
                 type="date"
                 value={serviceFormData.start_date}
                 onChange={(e) => setServiceFormData({ ...serviceFormData, start_date: e.target.value })}
-                required
               />
               <Input
-                label="Fecha de Vencimiento *"
+                label="Fecha de Vencimiento"
                 type="date"
                 value={serviceFormData.end_date}
                 onChange={(e) => setServiceFormData({ ...serviceFormData, end_date: e.target.value })}
-                required
               />
             </div>
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <Input
-                label="Duración del Contrato (meses)"
-                type="number"
-                value={serviceFormData.contract_duration_months}
-                onChange={(e) => setServiceFormData({ ...serviceFormData, contract_duration_months: e.target.value })}
-                placeholder="Ej: 12, 24, 36"
-              />
-              <Input
-                label="Monto del Contrato *"
+                label="Monto del Contrato"
                 type="number"
                 step="0.01"
                 value={serviceFormData.contract_amount}
                 onChange={(e) => setServiceFormData({ ...serviceFormData, contract_amount: e.target.value })}
-                required
                 placeholder="0.00"
               />
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <Select
-                label="Frecuencia de Pago *"
+                label="Frecuencia de Pago"
                 value={serviceFormData.payment_frequency}
                 onChange={(e) => setServiceFormData({ ...serviceFormData, payment_frequency: e.target.value })}
                 options={[
@@ -1306,16 +1113,8 @@ export default function ClientDetailPage() {
                   { value: 'one_time', label: 'Único' },
                 ]}
               />
-              <Input
-                label="Día de Facturación (1-31)"
-                type="number"
-                min="1"
-                max="31"
-                value={serviceFormData.billing_day}
-                onChange={(e) => setServiceFormData({ ...serviceFormData, billing_day: e.target.value })}
-                placeholder="Día del mes"
-              />
             </div>
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <Select
                 label="Área Responsable"
@@ -1323,10 +1122,7 @@ export default function ClientDetailPage() {
                 onChange={(e) => setServiceFormData({ ...serviceFormData, area_id: e.target.value })}
                 options={[
                   { value: '', label: 'Seleccionar área' },
-                  ...(areasData?.map(area => ({
-                    value: area.id.toString(),
-                    label: area.name,
-                  })) || []),
+                  ...(areasData?.map((a) => ({ value: String(a.id), label: a.name })) || []),
                 ]}
               />
               <Select
@@ -1335,25 +1131,41 @@ export default function ClientDetailPage() {
                 onChange={(e) => setServiceFormData({ ...serviceFormData, assigned_to: e.target.value })}
                 options={[
                   { value: '', label: 'Sin asignar' },
-                  ...(usersData?.map(user => ({
-                    value: user.id.toString(),
-                    label: `${user.name} (${user.email})`,
-                  })) || []),
+                  ...(usersData?.map((u) => ({ value: String(u.id), label: `${u.name} (${u.email})` })) || []),
                 ]}
               />
             </div>
-            <div className="flex items-center">
-              <input
-                type="checkbox"
-                id="auto_renewal"
-                checked={serviceFormData.auto_renewal}
-                onChange={(e) => setServiceFormData({ ...serviceFormData, auto_renewal: e.target.checked })}
-                className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded"
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <Input
+                label="Día de Facturación (1-31)"
+                type="number"
+                min="1"
+                max="31"
+                value={serviceFormData.billing_day}
+                onChange={(e) => setServiceFormData({ ...serviceFormData, billing_day: e.target.value })}
               />
-              <label htmlFor="auto_renewal" className="ml-2 block text-sm text-gray-900">
-                Renovación Automática
-              </label>
+              <div className="flex items-center gap-2 pt-7">
+                <input
+                  type="checkbox"
+                  id="auto_renewal"
+                  checked={serviceFormData.auto_renewal}
+                  onChange={(e) => setServiceFormData({ ...serviceFormData, auto_renewal: e.target.checked })}
+                  className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded"
+                />
+                <label htmlFor="auto_renewal" className="text-sm text-gray-900">
+                  Renovación automática
+                </label>
+              </div>
             </div>
+
+            <Textarea
+              label="Notas"
+              value={serviceFormData.notes}
+              onChange={(e) => setServiceFormData({ ...serviceFormData, notes: e.target.value })}
+              rows={3}
+              placeholder="Opcional…"
+            />
           </div>
         </Modal>
 
@@ -1406,7 +1218,7 @@ export default function ClientDetailPage() {
           <div className="space-y-4">
             {selectedService && (
               <div className="p-3 bg-gray-50 rounded">
-                <p className="text-sm font-medium text-gray-900">Servicio: {selectedService.name}</p>
+                <p className="text-sm font-medium text-gray-900">Servicio: {selectedService.service?.name || 'Servicio'}</p>
                 <p className="text-xs text-gray-500">Monto del contrato: {formatCurrency(selectedService.contract_amount || 0)}</p>
               </div>
             )}
@@ -1497,7 +1309,7 @@ export default function ClientDetailPage() {
           <div className="space-y-4">
             {selectedService && (
               <div className="p-3 bg-gray-50 rounded">
-                <p className="text-sm font-medium text-gray-900">Servicio: {selectedService.name}</p>
+                <p className="text-sm font-medium text-gray-900">Servicio: {selectedService.service?.name || 'Servicio'}</p>
                 <p className="text-xs text-gray-500">
                   Vencimiento actual: {selectedService.end_date ? formatDate(selectedService.end_date) : '-'}
                 </p>
@@ -1571,7 +1383,7 @@ export default function ClientDetailPage() {
           <div className="space-y-4">
             {selectedService && (
               <div className="p-3 bg-gray-50 rounded">
-                <p className="text-sm font-medium text-gray-900">Servicio: {selectedService.name}</p>
+                <p className="text-sm font-medium text-gray-900">Servicio: {selectedService.service?.name || 'Servicio'}</p>
               </div>
             )}
             <Input

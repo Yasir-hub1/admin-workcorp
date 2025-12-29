@@ -19,7 +19,7 @@ import Badge from '../../components/common/Badge';
 import Modal from '../../components/common/Modal';
 import Input from '../../components/common/Input';
 import Textarea from '../../components/common/Textarea';
-import { formatDate, formatDateTime } from '../../utils/formatters';
+import { formatDate, formatDateTime, calculateDaysBetween } from '../../utils/formatters';
 import { getStatusColor, getStatusLabel } from '../../utils/helpers';
 import toast from 'react-hot-toast';
 import useAuthStore from '../../store/authStore';
@@ -310,7 +310,7 @@ export default function RequestDetailPage() {
                     <div className="flex items-center gap-2">
                       <CalendarIcon className="h-4 w-4 text-gray-400" />
                       <p className="text-sm text-gray-900">
-                        {formatDate(request.start_date)}
+                        {request.start_date ? formatDate(request.start_date) : '-'}
                       </p>
                     </div>
                   </div>
@@ -356,7 +356,15 @@ export default function RequestDetailPage() {
                       Días Solicitados
                     </label>
                     <p className="text-sm text-gray-900">
-                      {request.days_requested || '-'} {request.days_requested === 1 ? 'día' : 'días'}
+                      {(() => {
+                        let days = request.days_requested;
+                        // Si no hay días pero hay fechas, calcular
+                        if (!days && request.start_date) {
+                          days = calculateDaysBetween(request.start_date, request.end_date);
+                        }
+                        if (!days) return '-';
+                        return `${days} ${days === 1 ? 'día' : 'días'}`;
+                      })()}
                     </p>
                   </div>
                 </div>

@@ -28,6 +28,8 @@ class Area extends Model
         'email',
         'phone',
         'location',
+        'logo_path',
+        'colors',
         'is_active',
         'order',
     ];
@@ -42,6 +44,7 @@ class Area extends Model
         'budget_annual' => 'decimal:2',
         'is_active' => 'boolean',
         'order' => 'integer',
+        'colors' => 'array', // Array de colores hexadecimales
     ];
 
     /**
@@ -82,6 +85,8 @@ class Area extends Model
     public function staffMembers(): BelongsToMany
     {
         return $this->belongsToMany(Staff::class, 'area_staff')
+            ->wherePivot('is_manager', false)
+            ->wherePivotNull('unassigned_at')
             ->withPivot('is_manager', 'assigned_at', 'unassigned_at', 'assigned_by')
             ->withTimestamps();
     }

@@ -4,6 +4,8 @@ namespace App\Http\Controllers\Api\V1\Areas;
 
 use App\Http\Controllers\Controller;
 use App\Models\Area;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -39,6 +41,14 @@ class AreaController extends Controller
 
     public function store(Request $request): JsonResponse
     {
+        // Convertir is_active a booleano si viene como string
+        if ($request->has('is_active')) {
+            $isActive = $request->input('is_active');
+            if (is_string($isActive)) {
+                $request->merge(['is_active' => in_array(strtolower($isActive), ['1', 'true', 'yes', 'on'])]);
+            }
+        }
+
         $validated = $request->validate([
             'name' => 'required|string|max:255',
             'code' => 'nullable|string|max:50|unique:areas,code',
@@ -50,7 +60,10 @@ class AreaController extends Controller
             'email' => 'nullable|email',
             'phone' => 'nullable|string',
             'location' => 'nullable|string',
-            'is_active' => 'boolean',
+            'logo' => 'nullable|image|mimes:jpeg,png,jpg,gif,svg|max:10240',
+            'colors' => 'nullable|array',
+            'colors.*' => 'nullable|string',
+            'is_active' => 'required|boolean',
             'order' => 'nullable|integer',
             'managers' => 'nullable|array',
             'managers.*' => 'exists:staff,id',
@@ -59,6 +72,28 @@ class AreaController extends Controller
         // Separar managers si vienen en el request
         $managers = $request->input('managers', []);
         unset($validated['managers']);
+
+        // Manejar subida de logo
+        if ($request->hasFile('logo')) {
+            $logoPath = $request->file('logo')->store('areas/logos', 'public');
+            $validated['logo_path'] = $logoPath;
+        }
+        unset($validated['logo']);
+
+        // Normalizar colores (asegurar que sean arrays válidos)
+        if ($request->has('colors') && is_array($request->colors)) {
+            $colors = array_filter($request->colors, function ($color) {
+                return !empty($color) && is_string($color) && preg_match('/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/', $color);
+            });
+            // Validar que haya entre 2 y 3 colores válidos
+            if (count($colors) > 0 && count($colors) <= 3) {
+                $validated['colors'] = array_values($colors); // Reindexar y mantener solo válidos
+            } else {
+                unset($validated['colors']);
+            }
+        } else {
+            unset($validated['colors']);
+        }
 
         $area = Area::create($validated);
 
@@ -110,6 +145,14 @@ class AreaController extends Controller
             ], 404);
         }
 
+        // Convertir is_active a booleano si viene como string
+        if ($request->has('is_active')) {
+            $isActive = $request->input('is_active');
+            if (is_string($isActive)) {
+                $request->merge(['is_active' => in_array(strtolower($isActive), ['1', 'true', 'yes', 'on'])]);
+            }
+        }
+
         $validated = $request->validate([
             'name' => 'sometimes|string|max:255',
             'code' => 'sometimes|string|max:50|unique:areas,code,' . $area->id,
@@ -118,7 +161,10 @@ class AreaController extends Controller
             'manager_id' => 'nullable|exists:users,id',
             'budget_monthly' => 'nullable|numeric|min:0',
             'budget_annual' => 'nullable|numeric|min:0',
-            'is_active' => 'boolean',
+            'logo' => 'nullable|image|mimes:jpeg,png,jpg,gif,svg|max:10240',
+            'colors' => 'nullable|array',
+            'colors.*' => 'nullable|string',
+            'is_active' => 'sometimes|boolean',
             'order' => 'nullable|integer',
             'managers' => 'nullable|array',
             'managers.*' => 'exists:staff,id',
@@ -127,6 +173,33 @@ class AreaController extends Controller
         // Separar managers si vienen en el request
         $managers = $request->input('managers', []);
         unset($validated['managers']);
+
+        // Manejar subida de logo
+        if ($request->hasFile('logo')) {
+            // Eliminar logo anterior si existe
+            if ($area->logo_path && Storage::disk('public')->exists($area->logo_path)) {
+                Storage::disk('public')->delete($area->logo_path);
+            }
+            $logoPath = $request->file('logo')->store('areas/logos', 'public');
+            $validated['logo_path'] = $logoPath;
+        }
+        unset($validated['logo']);
+
+        // Normalizar colores
+        if ($request->has('colors') && is_array($request->colors)) {
+            $colors = array_filter($request->colors, function ($color) {
+                return !empty($color) && is_string($color) && preg_match('/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/', $color);
+            });
+            // Validar que haya entre 2 y 3 colores válidos (o permitir 1 si se está actualizando)
+            if (count($colors) > 0 && count($colors) <= 3) {
+                $validated['colors'] = array_values($colors);
+            } else {
+                $validated['colors'] = null;
+            }
+        } elseif ($request->has('colors') && empty($request->colors)) {
+            // Si se envía array vacío, eliminar colores
+            $validated['colors'] = null;
+        }
 
         $area->update($validated);
 
@@ -217,6 +290,107 @@ class AreaController extends Controller
         ]);
     }
 
+    /**
+     * Assign staff members (personal) to an area.
+     * Nota: un personal puede estar en varias áreas (pivot area_staff con is_manager=false).
+     */
+    public function assignStaffMembers(Request $request, $id): JsonResponse
+    {
+        $request->validate([
+            'staff_ids' => 'required|array',
+            'staff_ids.*' => 'exists:staff,id',
+        ]);
+
+        $area = Area::find($id);
+        if (!$area) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Área no encontrada',
+            ], 404);
+        }
+
+        $staffIds = collect($request->staff_ids)->map(fn ($v) => (int) $v)->unique()->values();
+        $today = now()->toDateString();
+        $actorId = $request->user()->id;
+
+        // Obtener asignaciones actuales (solo personal, no managers)
+        $current = DB::table('area_staff')
+            ->where('area_id', $area->id)
+            ->where('is_manager', false)
+            ->whereNull('unassigned_at')
+            ->pluck('staff_id')
+            ->map(fn ($v) => (int) $v)
+            ->toArray();
+
+        $currentIds = collect($current);
+        $toUnassign = $currentIds->diff($staffIds)->values();
+
+        DB::beginTransaction();
+        try {
+            // Marcar como desasignados los que ya no están
+            if ($toUnassign->isNotEmpty()) {
+                DB::table('area_staff')
+                    ->where('area_id', $area->id)
+                    ->where('is_manager', false)
+                    ->whereNull('unassigned_at')
+                    ->whereIn('staff_id', $toUnassign->toArray())
+                    ->update([
+                        'unassigned_at' => $today,
+                        'updated_at' => now(),
+                    ]);
+            }
+
+            // Para cada staff_id seleccionado:
+            // - si existe registro (aunque esté unassigned), reactivar (unassigned_at=null)
+            // - si no existe, insertar
+            foreach ($staffIds as $sid) {
+                $exists = DB::table('area_staff')
+                    ->where('area_id', $area->id)
+                    ->where('staff_id', $sid)
+                    ->where('is_manager', false)
+                    ->exists();
+
+                if ($exists) {
+                    DB::table('area_staff')
+                        ->where('area_id', $area->id)
+                        ->where('staff_id', $sid)
+                        ->where('is_manager', false)
+                        ->update([
+                            'unassigned_at' => null,
+                            'assigned_at' => $today,
+                            'assigned_by' => $actorId,
+                            'updated_at' => now(),
+                        ]);
+                } else {
+                    DB::table('area_staff')->insert([
+                        'area_id' => $area->id,
+                        'staff_id' => $sid,
+                        'is_manager' => false,
+                        'assigned_at' => $today,
+                        'unassigned_at' => null,
+                        'assigned_by' => $actorId,
+                        'created_at' => now(),
+                        'updated_at' => now(),
+                    ]);
+                }
+            }
+
+            DB::commit();
+        } catch (\Throwable $e) {
+            DB::rollBack();
+            return response()->json([
+                'success' => false,
+                'message' => 'No se pudo asignar personal',
+            ], 500);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Personal asignado correctamente',
+            'data' => $area->load(['managers.user', 'staffMembers.user']),
+        ]);
+    }
+
     public function statistics($id): JsonResponse
     {
         $area = Area::find($id);
@@ -240,6 +414,78 @@ class AreaController extends Controller
         return response()->json([
             'success' => true,
             'data' => $stats,
+        ]);
+    }
+
+    /**
+     * Generate a unique area code based on the area name.
+     */
+    public function generateCode(Request $request): JsonResponse
+    {
+        $name = $request->input('name');
+        
+        if (!$name || empty(trim($name))) {
+            return response()->json([
+                'success' => false,
+                'message' => 'El nombre del área es requerido para generar el código',
+            ], 400);
+        }
+
+        // Generar código basado en las iniciales del nombre
+        $words = explode(' ', trim($name));
+        $code = '';
+        
+        // Si tiene una sola palabra, tomar las primeras 3-4 letras
+        if (count($words) === 1) {
+            $word = strtoupper($words[0]);
+            // Remover caracteres especiales
+            $word = preg_replace('/[^A-Z0-9]/', '', $word);
+            $code = substr($word, 0, 4);
+        } else {
+            // Si tiene múltiples palabras, tomar la primera letra de cada palabra
+            foreach ($words as $word) {
+                if (!empty($word)) {
+                    $firstChar = strtoupper(substr(trim($word), 0, 1));
+                    // Solo letras
+                    if (preg_match('/[A-Z]/', $firstChar)) {
+                        $code .= $firstChar;
+                    }
+                }
+                // Limitar a 4 caracteres máximo
+                if (strlen($code) >= 4) {
+                    break;
+                }
+            }
+        }
+
+        // Asegurar que tenga al menos 2 caracteres
+        if (strlen($code) < 2) {
+            $code = strtoupper(substr(preg_replace('/[^A-Z0-9]/', '', $name), 0, 3));
+        }
+
+        // Verificar que sea único, si no, agregar número
+        $originalCode = $code;
+        $counter = 1;
+        while (Area::where('code', $code)->exists()) {
+            // Si el código tiene más de 3 caracteres, truncar y agregar número
+            if (strlen($originalCode) > 2) {
+                $code = substr($originalCode, 0, 2) . $counter;
+            } else {
+                $code = $originalCode . $counter;
+            }
+            $counter++;
+            // Limitar intentos
+            if ($counter > 999) {
+                $code = $originalCode . time();
+                break;
+            }
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'code' => $code,
+            ],
         ]);
     }
 }

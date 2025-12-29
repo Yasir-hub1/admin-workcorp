@@ -58,6 +58,7 @@ class RolePermissionSeeder extends Seeder
         $allPermissions[] = Permission::firstOrCreate(['name' => 'areas.delete'], ['module' => 'areas', 'display_name' => 'Eliminar Áreas']);
         $allPermissions[] = Permission::firstOrCreate(['name' => 'areas.manage-budget'], ['module' => 'areas', 'display_name' => 'Gestionar Presupuestos']);
         $allPermissions[] = Permission::firstOrCreate(['name' => 'areas.assign-managers'], ['module' => 'areas', 'display_name' => 'Asignar Jefes de Área']);
+        $allPermissions[] = Permission::firstOrCreate(['name' => 'areas.assign-members'], ['module' => 'areas', 'display_name' => 'Asignar Personal a Áreas']);
 
         // ========== STAFF MODULE ==========
         $allPermissions[] = Permission::firstOrCreate(['name' => 'staff.view-all'], ['module' => 'staff', 'display_name' => 'Ver Todo el Personal']);
@@ -130,11 +131,16 @@ class RolePermissionSeeder extends Seeder
         $allPermissions[] = Permission::firstOrCreate(['name' => 'clients.view-all'], ['module' => 'clients', 'display_name' => 'Ver Todos los Clientes']);
         $allPermissions[] = Permission::firstOrCreate(['name' => 'clients.view-area'], ['module' => 'clients', 'display_name' => 'Ver Clientes de su Área']);
         $allPermissions[] = Permission::firstOrCreate(['name' => 'clients.view-own'], ['module' => 'clients', 'display_name' => 'Ver Mis Clientes']);
+        $allPermissions[] = Permission::firstOrCreate(['name' => 'clients.view-detail'], ['module' => 'clients', 'display_name' => 'Ver Detalle de Cliente']);
         $allPermissions[] = Permission::firstOrCreate(['name' => 'clients.create'], ['module' => 'clients', 'display_name' => 'Crear Clientes']);
         $allPermissions[] = Permission::firstOrCreate(['name' => 'clients.edit'], ['module' => 'clients', 'display_name' => 'Editar Clientes']);
         $allPermissions[] = Permission::firstOrCreate(['name' => 'clients.delete'], ['module' => 'clients', 'display_name' => 'Eliminar Clientes']);
         $allPermissions[] = Permission::firstOrCreate(['name' => 'clients.assign'], ['module' => 'clients', 'display_name' => 'Asignar Clientes']);
-        $allPermissions[] = Permission::firstOrCreate(['name' => 'clients.kardex'], ['module' => 'clients', 'display_name' => 'Ver Kardex de Cliente']);
+        // Kardex (historial de servicios/pagos/renovaciones/incidencias)
+        // Compat: mantenemos clients.kardex (viejo) como "ver"
+        $allPermissions[] = Permission::firstOrCreate(['name' => 'clients.kardex'], ['module' => 'clients', 'display_name' => 'Ver Kardex de Cliente (legacy)']);
+        $allPermissions[] = Permission::firstOrCreate(['name' => 'clients.kardex.view'], ['module' => 'clients', 'display_name' => 'Ver Kardex de Cliente']);
+        $allPermissions[] = Permission::firstOrCreate(['name' => 'clients.kardex.create'], ['module' => 'clients', 'display_name' => 'Crear/Registrar en Kardex de Cliente']);
 
         // ========== SERVICES MODULE ==========
         $allPermissions[] = Permission::firstOrCreate(['name' => 'services.view-all'], ['module' => 'services', 'display_name' => 'Ver Todos los Servicios']);
@@ -146,6 +152,10 @@ class RolePermissionSeeder extends Seeder
         $allPermissions[] = Permission::firstOrCreate(['name' => 'services.renew'], ['module' => 'services', 'display_name' => 'Renovar Servicios']);
         $allPermissions[] = Permission::firstOrCreate(['name' => 'services.assign'], ['module' => 'services', 'display_name' => 'Asignar Servicios']);
         $allPermissions[] = Permission::firstOrCreate(['name' => 'services.manage-incidents'], ['module' => 'services', 'display_name' => 'Gestionar Incidencias']);
+        $allPermissions[] = Permission::firstOrCreate(['name' => 'services.expiry-reminders'], ['module' => 'services', 'display_name' => 'Recibir Recordatorios de Vencimiento (Servicios)']);
+        $allPermissions[] = Permission::firstOrCreate(['name' => 'services.payments.create'], ['module' => 'services', 'display_name' => 'Registrar Pagos de Servicios']);
+        $allPermissions[] = Permission::firstOrCreate(['name' => 'services.renewals.create'], ['module' => 'services', 'display_name' => 'Registrar Renovaciones de Servicios']);
+        $allPermissions[] = Permission::firstOrCreate(['name' => 'services.incidents.create'], ['module' => 'services', 'display_name' => 'Registrar Incidencias de Servicios']);
 
         // ========== INVENTORY MODULE ==========
         $allPermissions[] = Permission::firstOrCreate(['name' => 'inventory.view-all'], ['module' => 'inventory', 'display_name' => 'Ver Todo el Inventario']);
@@ -193,6 +203,10 @@ class RolePermissionSeeder extends Seeder
         // ========== STATISTICS MODULE ==========
         $allPermissions[] = Permission::firstOrCreate(['name' => 'statistics.view'], ['module' => 'statistics', 'display_name' => 'Ver Estadísticas']);
 
+        // ========== SUPPORT CALENDAR MODULE ==========
+        $allPermissions[] = Permission::firstOrCreate(['name' => 'support_calendar.view'], ['module' => 'support_calendar', 'display_name' => 'Ver Calendario de Soporte']);
+        $allPermissions[] = Permission::firstOrCreate(['name' => 'support_calendar.manage'], ['module' => 'support_calendar', 'display_name' => 'Gestionar Calendario de Soporte']);
+
         // ========== SYSTEM MODULE ==========
         $allPermissions[] = Permission::create(['name' => 'system.config', 'module' => 'system', 'display_name' => 'Configurar Sistema']);
         $allPermissions[] = Permission::create(['name' => 'system.audit', 'module' => 'system', 'display_name' => 'Ver Logs de Auditoría']);
@@ -222,9 +236,12 @@ class RolePermissionSeeder extends Seeder
             // Assets
             'assets.view-area', 'assets.create', 'assets.assign', 'assets.maintenance',
             // Clients
-            'clients.view-area', 'clients.create', 'clients.edit', 'clients.assign',
+            'clients.view-area', 'clients.view-detail', 'clients.create', 'clients.edit', 'clients.assign',
+            'clients.kardex.view', 'clients.kardex.create',
             // Services
             'services.view-area', 'services.create', 'services.edit', 'services.assign',
+            'services.expiry-reminders',
+            'services.payments.create', 'services.renewals.create', 'services.incidents.create',
             // Inventory
             'inventory.view-area', 'inventory.create', 'inventory.movements',
             // Tickets
@@ -236,6 +253,12 @@ class RolePermissionSeeder extends Seeder
 
             // Statistics
             'statistics.view',
+
+            // Areas
+            'areas.assign-members',
+
+            // Support calendar (solo ver)
+            'support_calendar.view',
         ];
 
         $jefeArea->permissions()->syncWithoutDetaching(
@@ -257,15 +280,21 @@ class RolePermissionSeeder extends Seeder
             // Assets
             'assets.view-own',
             // Clients
-            'clients.view-own', 'clients.edit',
+            'clients.view-own', 'clients.view-detail', 'clients.edit',
+            'clients.kardex.view',
             // Services
             'services.view-own', 'services.edit',
+            'services.expiry-reminders',
+            'services.payments.create', 'services.renewals.create', 'services.incidents.create',
             // Inventory
             'inventory.view-all',
             // Tickets
             'tickets.create', 'tickets.view-own',
             // Notifications
             'notifications.view',
+
+            // Support calendar (solo ver)
+            'support_calendar.view',
         ];
 
         $personal->permissions()->syncWithoutDetaching(

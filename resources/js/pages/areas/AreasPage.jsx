@@ -64,11 +64,32 @@ export default function AreasPage() {
       key: 'name',
       header: 'Área',
       render: (value, row) => (
-        <div>
-          <div className="font-medium text-gray-900">{value}</div>
-          {row.code && (
-            <div className="text-sm text-gray-500">Código: {row.code}</div>
+        <div className="flex items-center gap-3">
+          {row.logo_path && (
+            <img
+              src={`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/storage/${row.logo_path}`}
+              alt={`Logo de ${value}`}
+              className="h-10 w-10 object-contain border border-gray-300 rounded p-1 bg-white"
+            />
           )}
+          <div>
+            <div className="font-medium text-gray-900">{value}</div>
+            {row.code && (
+              <div className="text-sm text-gray-500">Código: {row.code}</div>
+            )}
+            {row.colors && Array.isArray(row.colors) && row.colors.length > 0 && (
+              <div className="flex gap-1 mt-1">
+                {row.colors.map((color, idx) => (
+                  <div
+                    key={idx}
+                    className="w-4 h-4 rounded border border-gray-300"
+                    style={{ backgroundColor: color }}
+                    title={color}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       ),
     },

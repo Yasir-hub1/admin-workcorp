@@ -47,6 +47,41 @@ export default function CreateAssetPage() {
 
   const [isFormInitialized, setIsFormInitialized] = useState(false);
 
+  // Función para generar código automáticamente
+  const generateCode = async () => {
+    if (isEditMode) return; // No generar en modo edición
+    
+    try {
+      const params = {};
+      if (formData.area_id) params.area_id = formData.area_id;
+      if (formData.category) params.category = formData.category;
+      
+      const response = await apiClient.get('/assets/generate-code', { params });
+      if (response.data.success && response.data.data.code) {
+        setFormData(prev => ({
+          ...prev,
+          code: response.data.data.code,
+        }));
+      }
+    } catch (error) {
+      console.error('Error generando código:', error);
+    }
+  };
+
+  // Generar código cuando cambia el área o categoría
+  useEffect(() => {
+    if (!isEditMode && !formData.code && (formData.area_id || formData.category)) {
+      generateCode();
+    }
+  }, [formData.area_id, formData.category]);
+
+  // Generar código inicial al cargar el formulario (solo en creación)
+  useEffect(() => {
+    if (!isEditMode && !formData.code) {
+      generateCode();
+    }
+  }, []);
+
   // Obtener activo si está en modo edición
   const { data: assetData, isLoading: loadingAsset } = useQuery({
     queryKey: ['asset', id],
@@ -172,6 +207,11 @@ export default function CreateAssetPage() {
       assigned_to: formData.assigned_to ? parseInt(formData.assigned_to) : null,
     };
 
+    // En modo edición, no enviar el código (es inmutable)
+    if (isEditMode) {
+      delete submitData.code;
+    }
+
     // Limpiar campos vacíos
     Object.keys(submitData).forEach(key => {
       if (submitData[key] === '' || submitData[key] === null) {
@@ -234,12 +274,35 @@ export default function CreateAssetPage() {
                   required
                   placeholder="Ej: Laptop Dell"
                 />
-                <Input
-                  label="Código"
-                  value={formData.code}
-                  onChange={(e) => setFormData({ ...formData, code: e.target.value })}
-                  placeholder="Código único del activo"
-                />
+                <div className="flex items-end gap-2">
+                  <div className="flex-1">
+                    <Input
+                      label="Código"
+                      value={formData.code}
+                      onChange={(e) => setFormData({ ...formData, code: e.target.value })}
+                      placeholder="Se generará automáticamente"
+                      readOnly={true}
+                      disabled={true}
+                      className="bg-gray-50 cursor-not-allowed"
+                    />
+                    {isEditMode && (
+                      <p className="mt-1 text-xs text-gray-500">
+                        El código no se puede modificar una vez creado
+                      </p>
+                    )}
+                  </div>
+                  {!isEditMode && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={generateCode}
+                      className="mb-0"
+                    >
+                      Regenerar
+                    </Button>
+                  )}
+                </div>
                 <Input
                   label="Número de Serie"
                   value={formData.serial_number}
@@ -249,7 +312,13 @@ export default function CreateAssetPage() {
                 <Input
                   label="Categoría *"
                   value={formData.category}
-                  onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+                  onChange={(e) => {
+                    setFormData({ ...formData, category: e.target.value });
+                    // Regenerar código si cambia la categoría
+                    if (!isEditMode) {
+                      setTimeout(() => generateCode(), 100);
+                    }
+                  }}
                   required
                   placeholder="Ej: Equipos de cómputo"
                 />
@@ -352,7 +421,13 @@ export default function CreateAssetPage() {
                 <Select
                   label="Área"
                   value={formData.area_id}
-                  onChange={(e) => setFormData({ ...formData, area_id: e.target.value })}
+                  onChange={(e) => {
+                    setFormData({ ...formData, area_id: e.target.value });
+                    // Regenerar código si cambia el área
+                    if (!isEditMode) {
+                      setTimeout(() => generateCode(), 100);
+                    }
+                  }}
                   options={[
                     { value: '', label: 'Seleccionar área' },
                     ...(areasData?.map(area => ({

@@ -15,8 +15,10 @@ import Input from '../../components/common/Input';
 import Select from '../../components/common/Select';
 import { formatDate } from '../../utils/formatters';
 import { getStatusColor, getStatusLabel, debounce } from '../../utils/helpers';
+import useAuthStore from '../../store/authStore';
 
 export default function ClientsPage() {
+  const { hasPermission, isSuperAdmin } = useAuthStore();
   const [page, setPage] = useState(1);
   const [searchInput, setSearchInput] = useState('');
   const [filters, setFilters] = useState({
@@ -74,6 +76,21 @@ export default function ClientsPage() {
       return response.data;
     },
   });
+
+  const canViewClients =
+    isSuperAdmin()
+    || hasPermission('clients.view-all')
+    || hasPermission('clients.view-area')
+    || hasPermission('clients.view-own');
+
+  const canViewClientDetail =
+    isSuperAdmin()
+    || hasPermission('clients.view-detail')
+    || canViewClients;
+
+  const canCreateClient =
+    isSuperAdmin()
+    || hasPermission('clients.create');
 
   const columns = [
     {
@@ -160,12 +177,16 @@ export default function ClientsPage() {
       key: 'actions',
       header: '',
       render: (_, row) => (
-        <Link
-          to={`/clients/${row.id}`}
-          className="text-indigo-600 hover:text-indigo-900 text-sm font-medium"
-        >
-          Ver detalles
-        </Link>
+        canViewClientDetail ? (
+          <Link
+            to={`/clients/${row.id}`}
+            className="text-indigo-600 hover:text-indigo-900 text-sm font-medium"
+          >
+            Ver detalles
+          </Link>
+        ) : (
+          <span className="text-gray-400 text-sm">-</span>
+        )
       ),
     },
   ];
@@ -192,12 +213,14 @@ export default function ClientsPage() {
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
           >
-            <Link to="/clients/create">
-              <Button icon={PlusIcon} className="w-full sm:w-auto">
-                <span className="hidden sm:inline">Nuevo Cliente</span>
-                <span className="sm:hidden">Nuevo</span>
-              </Button>
-            </Link>
+            {canCreateClient && (
+              <Link to="/clients/create">
+                <Button icon={PlusIcon} className="w-full sm:w-auto">
+                  <span className="hidden sm:inline">Nuevo Cliente</span>
+                  <span className="sm:hidden">Nuevo</span>
+                </Button>
+              </Link>
+            )}
           </motion.div>
         </motion.div>
 

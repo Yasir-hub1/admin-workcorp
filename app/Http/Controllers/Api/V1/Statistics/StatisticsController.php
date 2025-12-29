@@ -38,31 +38,35 @@ class StatisticsController extends Controller
 
         // Tickets base query
         $ticketsBase = Ticket::query()
-            ->whereDate('created_at', '>=', $startDate)
-            ->whereDate('created_at', '<=', $endDate);
+            ->whereNull('tickets.deleted_at')
+            ->whereDate('tickets.created_at', '>=', $startDate)
+            ->whereDate('tickets.created_at', '<=', $endDate);
         if ($areaId) {
-            $ticketsBase->where('area_id', $areaId);
+            $ticketsBase->where('tickets.area_id', $areaId);
         }
 
         $ticketsByStatus = (clone $ticketsBase)
-            ->select('status', DB::raw('COUNT(*) as count'))
-            ->groupBy('status')
+            ->select('tickets.status', DB::raw('COUNT(*) as count'))
+            ->groupBy('tickets.status')
             ->orderByDesc('count')
             ->get()
             ->map(fn ($r) => ['name' => $r->status, 'value' => (int) $r->count])
             ->values();
 
         $ticketsByPriority = (clone $ticketsBase)
-            ->select('priority', DB::raw('COUNT(*) as count'))
-            ->groupBy('priority')
+            ->select('tickets.priority', DB::raw('COUNT(*) as count'))
+            ->groupBy('tickets.priority')
             ->orderByDesc('count')
             ->get()
             ->map(fn ($r) => ['name' => $r->priority, 'value' => (int) $r->count])
             ->values();
 
         $topClients = (clone $ticketsBase)
-            ->whereNotNull('client_id')
-            ->join('clients', 'clients.id', '=', 'tickets.client_id')
+            ->whereNotNull('tickets.client_id')
+            ->join('clients', function ($join) {
+                $join->on('clients.id', '=', 'tickets.client_id')
+                    ->whereNull('clients.deleted_at');
+            })
             ->select(
                 'clients.id as client_id',
                 'clients.business_name',
@@ -82,53 +86,55 @@ class StatisticsController extends Controller
             ->values();
 
         $ticketsTrend = (clone $ticketsBase)
-            ->select(DB::raw("DATE(created_at) as date"), DB::raw('COUNT(*) as count'))
-            ->groupBy(DB::raw("DATE(created_at)"))
-            ->orderBy(DB::raw("DATE(created_at)"))
+            ->select(DB::raw("DATE(tickets.created_at) as date"), DB::raw('COUNT(*) as count'))
+            ->groupBy(DB::raw("DATE(tickets.created_at)"))
+            ->orderBy(DB::raw("DATE(tickets.created_at)"))
             ->get()
             ->map(fn ($r) => ['date' => (string) $r->date, 'value' => (int) $r->count])
             ->values();
 
         // Meetings
         $meetingsBase = Meeting::query()
-            ->whereDate('start_time', '>=', $startDate)
-            ->whereDate('start_time', '<=', $endDate);
+            ->whereNull('meetings.deleted_at')
+            ->whereDate('meetings.start_time', '>=', $startDate)
+            ->whereDate('meetings.start_time', '<=', $endDate);
         if ($areaId) {
-            $meetingsBase->where('area_id', $areaId);
+            $meetingsBase->where('meetings.area_id', $areaId);
         }
 
         $meetingsByStatus = (clone $meetingsBase)
-            ->select('status', DB::raw('COUNT(*) as count'))
-            ->groupBy('status')
+            ->select('meetings.status', DB::raw('COUNT(*) as count'))
+            ->groupBy('meetings.status')
             ->orderByDesc('count')
             ->get()
             ->map(fn ($r) => ['name' => $r->status, 'value' => (int) $r->count])
             ->values();
 
         $upcomingMeetingsCount = (clone $meetingsBase)
-            ->where('status', 'scheduled')
-            ->where('start_time', '>', now())
+            ->where('meetings.status', 'scheduled')
+            ->where('meetings.start_time', '>', now())
             ->count();
 
         $meetingsTrend = (clone $meetingsBase)
-            ->select(DB::raw("DATE(start_time) as date"), DB::raw('COUNT(*) as count'))
-            ->groupBy(DB::raw("DATE(start_time)"))
-            ->orderBy(DB::raw("DATE(start_time)"))
+            ->select(DB::raw("DATE(meetings.start_time) as date"), DB::raw('COUNT(*) as count'))
+            ->groupBy(DB::raw("DATE(meetings.start_time)"))
+            ->orderBy(DB::raw("DATE(meetings.start_time)"))
             ->get()
             ->map(fn ($r) => ['date' => (string) $r->date, 'value' => (int) $r->count])
             ->values();
 
         // Requests
         $requestsBase = RequestModel::query()
-            ->whereDate('created_at', '>=', $startDate)
-            ->whereDate('created_at', '<=', $endDate);
+            ->whereNull('requests.deleted_at')
+            ->whereDate('requests.created_at', '>=', $startDate)
+            ->whereDate('requests.created_at', '<=', $endDate);
         if ($areaId) {
-            $requestsBase->where('area_id', $areaId);
+            $requestsBase->where('requests.area_id', $areaId);
         }
 
         $requestsByStatus = (clone $requestsBase)
-            ->select('status', DB::raw('COUNT(*) as count'))
-            ->groupBy('status')
+            ->select('requests.status', DB::raw('COUNT(*) as count'))
+            ->groupBy('requests.status')
             ->orderByDesc('count')
             ->get()
             ->map(fn ($r) => ['name' => $r->status, 'value' => (int) $r->count])
@@ -136,15 +142,16 @@ class StatisticsController extends Controller
 
         // Expenses
         $expensesBase = Expense::query()
-            ->whereDate('expense_date', '>=', $startDate)
-            ->whereDate('expense_date', '<=', $endDate);
+            ->whereNull('expenses.deleted_at')
+            ->whereDate('expenses.expense_date', '>=', $startDate)
+            ->whereDate('expenses.expense_date', '<=', $endDate);
         if ($areaId) {
-            $expensesBase->where('area_id', $areaId);
+            $expensesBase->where('expenses.area_id', $areaId);
         }
 
         $expensesByStatus = (clone $expensesBase)
-            ->select('status', DB::raw('COUNT(*) as count'), DB::raw('SUM(amount) as total_amount'))
-            ->groupBy('status')
+            ->select('expenses.status', DB::raw('COUNT(*) as count'), DB::raw('SUM(expenses.amount) as total_amount'))
+            ->groupBy('expenses.status')
             ->orderByDesc('total_amount')
             ->get()
             ->map(fn ($r) => [
@@ -155,9 +162,9 @@ class StatisticsController extends Controller
             ->values();
 
         $expensesTrend = (clone $expensesBase)
-            ->select(DB::raw("DATE(expense_date) as date"), DB::raw('SUM(amount) as total'))
-            ->groupBy(DB::raw("DATE(expense_date)"))
-            ->orderBy(DB::raw("DATE(expense_date)"))
+            ->select(DB::raw("DATE(expenses.expense_date) as date"), DB::raw('SUM(expenses.amount) as total'))
+            ->groupBy(DB::raw("DATE(expenses.expense_date)"))
+            ->orderBy(DB::raw("DATE(expenses.expense_date)"))
             ->get()
             ->map(fn ($r) => ['date' => (string) $r->date, 'value' => (float) ($r->total ?? 0)])
             ->values();

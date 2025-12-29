@@ -30,13 +30,9 @@ class RoleController extends Controller
             });
         }
 
-        if ($request->has('level') && $request->level !== '') {
-            $query->where('level', $request->level);
-        }
-
         // Pagination
         $perPage = $request->get('per_page', 15);
-        $roles = $query->orderBy('level')->orderBy('name')->paginate($perPage);
+        $roles = $query->orderBy('name')->paginate($perPage);
 
         return response()->json([
             'success' => true,
@@ -61,7 +57,8 @@ class RoleController extends Controller
             'name' => $data['name'],
             'display_name' => $data['display_name'],
             'description' => $data['description'] ?? null,
-            'level' => $data['level'] ?? 3,
+            // legacy: mantenemos columna, pero ya no se gestiona por UI (siempre 3 para roles custom)
+            'level' => 3,
         ]);
 
         // Attach permissions if provided
@@ -116,7 +113,8 @@ class RoleController extends Controller
             'name' => $data['name'] ?? $role->name,
             'display_name' => $data['display_name'] ?? $role->display_name,
             'description' => $data['description'] ?? $role->description,
-            'level' => $data['level'] ?? $role->level,
+            // No tocar 'level' desde UI para roles custom
+            'level' => $role->level,
         ]);
 
         // Sync permissions if provided

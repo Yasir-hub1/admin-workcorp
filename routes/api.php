@@ -56,6 +56,20 @@ Route::prefix('v1')->group(function () {
             ]);
         })->name('api.v1.test');
 
+        // Notes (sensitive shared notes)
+        Route::prefix('notes')->group(function () {
+            Route::get('/', [\App\Http\Controllers\Api\V1\Notes\NoteController::class, 'index'])
+                ->name('api.v1.notes.index');
+            Route::post('/', [\App\Http\Controllers\Api\V1\Notes\NoteController::class, 'store'])
+                ->name('api.v1.notes.store');
+            Route::get('/{id}', [\App\Http\Controllers\Api\V1\Notes\NoteController::class, 'show'])
+                ->name('api.v1.notes.show');
+            Route::put('/{id}', [\App\Http\Controllers\Api\V1\Notes\NoteController::class, 'update'])
+                ->name('api.v1.notes.update');
+            Route::delete('/{id}', [\App\Http\Controllers\Api\V1\Notes\NoteController::class, 'destroy'])
+                ->name('api.v1.notes.destroy');
+        });
+
         // Assets Routes
         Route::prefix('assets')->group(function () {
             Route::get('/', [\App\Http\Controllers\Api\V1\Assets\AssetController::class, 'index'])
@@ -67,6 +81,9 @@ Route::prefix('v1')->group(function () {
             Route::get('/statistics', [\App\Http\Controllers\Api\V1\Assets\AssetController::class, 'statistics'])
                 ->middleware('permission:assets.view-all|assets.view-area|assets.view-own')
                 ->name('api.v1.assets.statistics');
+            Route::get('/generate-code', [\App\Http\Controllers\Api\V1\Assets\AssetController::class, 'generateCode'])
+                ->middleware('permission:assets.create')
+                ->name('api.v1.assets.generate-code');
             Route::get('/{id}', [\App\Http\Controllers\Api\V1\Assets\AssetController::class, 'show'])
                 ->middleware('permission:assets.view-all|assets.view-area|assets.view-own')
                 ->name('api.v1.assets.show');
@@ -90,6 +107,27 @@ Route::prefix('v1')->group(function () {
             Route::delete('/maintenances/{id}', [\App\Http\Controllers\Api\V1\Assets\AssetMaintenanceController::class, 'destroy'])
                 ->middleware('permission:assets.maintenance')
                 ->name('api.v1.assets.maintenances.destroy');
+        });
+
+        // Support Calendar (Saturday support duty)
+        Route::prefix('support-calendar')->group(function () {
+            Route::get('/access', [\App\Http\Controllers\Api\V1\SupportCalendar\SupportCalendarController::class, 'access'])
+                ->name('api.v1.support-calendar.access');
+
+            Route::get('/', [\App\Http\Controllers\Api\V1\SupportCalendar\SupportCalendarController::class, 'index'])
+                ->name('api.v1.support-calendar.index');
+
+            Route::post('/assign', [\App\Http\Controllers\Api\V1\SupportCalendar\SupportCalendarController::class, 'assign'])
+                ->middleware('permission:support_calendar.manage')
+                ->name('api.v1.support-calendar.assign');
+
+            Route::post('/generate', [\App\Http\Controllers\Api\V1\SupportCalendar\SupportCalendarController::class, 'generate'])
+                ->middleware('permission:support_calendar.manage')
+                ->name('api.v1.support-calendar.generate');
+
+            Route::post('/viewers', [\App\Http\Controllers\Api\V1\SupportCalendar\SupportCalendarController::class, 'setViewers'])
+                ->middleware('permission:support_calendar.manage')
+                ->name('api.v1.support-calendar.viewers');
         });
 
         // Expenses Routes
@@ -132,10 +170,10 @@ Route::prefix('v1')->group(function () {
                 ->middleware('permission:clients.view-all|clients.view-area|clients.view-own')
                 ->name('api.v1.clients.statistics');
             Route::get('/{id}', [\App\Http\Controllers\Api\V1\Clients\ClientController::class, 'show'])
-                ->middleware('permission:clients.view-all|clients.view-area|clients.view-own')
+                ->middleware('permission:clients.view-detail|clients.view-all|clients.view-area|clients.view-own')
                 ->name('api.v1.clients.show');
             Route::get('/{id}/kardex', [\App\Http\Controllers\Api\V1\Clients\ClientController::class, 'kardex'])
-                ->middleware('permission:clients.kardex')
+                ->middleware('permission:clients.kardex.view|clients.kardex')
                 ->name('api.v1.clients.kardex');
             Route::put('/{id}', [\App\Http\Controllers\Api\V1\Clients\ClientController::class, 'update'])
                 ->middleware('permission:clients.edit')
@@ -159,12 +197,41 @@ Route::prefix('v1')->group(function () {
             Route::get('/{id}', [\App\Http\Controllers\Api\V1\Services\ServiceController::class, 'show'])
                 ->middleware('permission:services.view-all|services.view-area|services.view-own')
                 ->name('api.v1.services.show');
+            // Kardex operations (payments/renewals/incidents)
+            Route::post('/{id}/payment', [\App\Http\Controllers\Api\V1\Services\ServiceController::class, 'payment'])
+                ->middleware('permission:services.payments.create')
+                ->name('api.v1.services.payment');
+            Route::post('/{id}/renew', [\App\Http\Controllers\Api\V1\Services\ServiceController::class, 'renew'])
+                ->middleware('permission:services.renewals.create')
+                ->name('api.v1.services.renew');
+            Route::post('/{id}/incident', [\App\Http\Controllers\Api\V1\Services\ServiceController::class, 'incident'])
+                ->middleware('permission:services.incidents.create')
+                ->name('api.v1.services.incident');
             Route::put('/{id}', [\App\Http\Controllers\Api\V1\Services\ServiceController::class, 'update'])
                 ->middleware('permission:services.edit')
                 ->name('api.v1.services.update');
             Route::delete('/{id}', [\App\Http\Controllers\Api\V1\Services\ServiceController::class, 'destroy'])
                 ->middleware('permission:services.delete')
                 ->name('api.v1.services.destroy');
+        });
+
+        // Client Services (Kardex) Routes
+        Route::prefix('clients')->group(function () {
+            Route::post('/{id}/kardex/services', [\App\Http\Controllers\Api\V1\ClientServices\ClientServiceController::class, 'storeForClient'])
+                ->middleware('permission:clients.kardex.create')
+                ->name('api.v1.clients.kardex.services.store');
+        });
+
+        Route::prefix('client-services')->group(function () {
+            Route::post('/{id}/payment', [\App\Http\Controllers\Api\V1\ClientServices\ClientServiceController::class, 'payment'])
+                ->middleware('permission:clients.kardex.create')
+                ->name('api.v1.client-services.payment');
+            Route::post('/{id}/renew', [\App\Http\Controllers\Api\V1\ClientServices\ClientServiceController::class, 'renew'])
+                ->middleware('permission:clients.kardex.create')
+                ->name('api.v1.client-services.renew');
+            Route::post('/{id}/incident', [\App\Http\Controllers\Api\V1\ClientServices\ClientServiceController::class, 'incident'])
+                ->middleware('permission:clients.kardex.create')
+                ->name('api.v1.client-services.incident');
         });
 
         // Inventory Routes
@@ -352,6 +419,9 @@ Route::prefix('v1')->group(function () {
             Route::post('/', [\App\Http\Controllers\Api\V1\Areas\AreaController::class, 'store'])
                 ->middleware('permission:areas.create')
                 ->name('api.v1.areas.store');
+            Route::get('/generate-code', [\App\Http\Controllers\Api\V1\Areas\AreaController::class, 'generateCode'])
+                ->middleware('permission:areas.create')
+                ->name('api.v1.areas.generate-code');
             Route::get('/{id}', [\App\Http\Controllers\Api\V1\Areas\AreaController::class, 'show'])
                 ->middleware('permission:areas.view')
                 ->name('api.v1.areas.show');
@@ -367,6 +437,9 @@ Route::prefix('v1')->group(function () {
             Route::post('/{id}/managers', [\App\Http\Controllers\Api\V1\Areas\AreaController::class, 'assignManagers'])
                 ->middleware('permission:areas.assign-managers')
                 ->name('api.v1.areas.assign-managers');
+            Route::post('/{id}/staff-members', [\App\Http\Controllers\Api\V1\Areas\AreaController::class, 'assignStaffMembers'])
+                ->middleware('permission:areas.assign-members')
+                ->name('api.v1.areas.assign-staff-members');
         });
 
         // Staff Routes
@@ -377,6 +450,9 @@ Route::prefix('v1')->group(function () {
             Route::post('/', [\App\Http\Controllers\Api\V1\Staff\StaffController::class, 'store'])
                 ->middleware('permission:staff.create')
                 ->name('api.v1.staff.store');
+            Route::get('/generate-employee-number', [\App\Http\Controllers\Api\V1\Staff\StaffController::class, 'generateEmployeeNumber'])
+                ->middleware('permission:staff.create')
+                ->name('api.v1.staff.generate-employee-number');
             Route::get('/{id}', [\App\Http\Controllers\Api\V1\Staff\StaffController::class, 'show'])
                 ->middleware('permission:staff.view-all|staff.view-own')
                 ->name('api.v1.staff.show');
@@ -469,6 +545,9 @@ Route::prefix('v1')->group(function () {
             Route::get('/attendance', [\App\Http\Controllers\Api\V1\Reports\AttendanceReportController::class, 'index'])
                 ->middleware('permission:reports.view-all|reports.view-area')
                 ->name('api.v1.reports.attendance');
+            Route::get('/attendance/locations', [\App\Http\Controllers\Api\V1\Reports\AttendanceReportController::class, 'locations'])
+                ->middleware('permission:reports.view-all|reports.view-area')
+                ->name('api.v1.reports.attendance.locations');
             Route::get('/tickets', [\App\Http\Controllers\Api\V1\Reports\TicketsReportController::class, 'index'])
                 ->middleware('permission:reports.view-all|reports.view-area')
                 ->name('api.v1.reports.tickets');

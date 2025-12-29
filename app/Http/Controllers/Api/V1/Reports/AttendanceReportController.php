@@ -4,9 +4,12 @@ namespace App\Http\Controllers\Api\V1\Reports;
 
 use App\Http\Controllers\Controller;
 use App\Models\Attendance;
+use App\Models\AttendanceRecord;
+use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 
 class AttendanceReportController extends Controller
 {
@@ -106,6 +109,80 @@ class AttendanceReportController extends Controller
         ]);
     }
 
+    /**
+     * Devuelve las marcaciones (AttendanceRecord) con coordenadas para pintar en mapa.
+     * Requiere user_id (porque el mapa es por personal).
+     */
+    public function locations(Request $request): JsonResponse
+    {
+        $user = Auth::user();
+
+        $validated = $request->validate([
+            'user_id' => 'required|integer|exists:users,id',
+            'start_date' => 'nullable|date',
+            'end_date' => 'nullable|date',
+        ]);
+
+        $targetUserId = (int) $validated['user_id'];
+        $startDate = $validated['start_date'] ?? now()->startOfMonth()->toDateString();
+        $endDate = $validated['end_date'] ?? now()->endOfMonth()->toDateString();
+
+        // Seguridad: jefe_area solo puede ver su área. Admin ve todo.
+        if (!$user->isSuperAdmin()) {
+            if (!$user->hasPermission('reports.view-area') || !$user->area_id) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'No autorizado',
+                ], 403);
+            }
+
+            $target = User::select('id', 'area_id')->find($targetUserId);
+            if (!$target || (int) $target->area_id !== (int) $user->area_id) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'No autorizado',
+                ], 403);
+            }
+        }
+
+        $records = AttendanceRecord::query()
+            ->whereHas('attendance', function ($q) use ($targetUserId, $startDate, $endDate) {
+                $q->where('user_id', $targetUserId)
+                    ->whereBetween('date', [$startDate, $endDate]);
+            })
+            ->whereNotNull('location')
+            ->orderBy('timestamp')
+            ->get(['id', 'attendance_id', 'type', 'mark_reason', 'timestamp', 'location', 'notes']);
+
+        $points = $records->map(function (AttendanceRecord $r) {
+            [$lat, $lng] = $this->parseLatLng($r->location);
+            if ($lat === null || $lng === null) {
+                return null;
+            }
+            return [
+                'id' => $r->id,
+                'attendance_id' => $r->attendance_id,
+                'type' => $r->type,
+                'mark_reason' => $r->mark_reason,
+                'timestamp' => $r->timestamp?->toISOString(),
+                'location' => $r->location,
+                'lat' => $lat,
+                'lng' => $lng,
+                'notes' => $r->notes,
+            ];
+        })->filter()->values();
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'user_id' => $targetUserId,
+                'start_date' => $startDate,
+                'end_date' => $endDate,
+                'points' => $points,
+            ],
+        ]);
+    }
+
     private function periodRange(string $key, string $groupBy): array
     {
         if ($groupBy === 'week') {
@@ -126,6 +203,23 @@ class AttendanceReportController extends Controller
 
         // day
         return [$key, $key];
+    }
+
+    private function parseLatLng(?string $location): array
+    {
+        if (!$location) {
+            return [null, null];
+        }
+        $parts = array_map('trim', explode(',', $location));
+        if (count($parts) !== 2) {
+            return [null, null];
+        }
+        $lat = is_numeric($parts[0]) ? (float) $parts[0] : null;
+        $lng = is_numeric($parts[1]) ? (float) $parts[1] : null;
+        if ($lat === null || $lng === null) {
+            return [null, null];
+        }
+        return [$lat, $lng];
     }
 }
 

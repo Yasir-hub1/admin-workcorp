@@ -12,7 +12,9 @@ class UpdateRoleRequest extends FormRequest
      */
     public function authorize(): bool
     {
-        return $this->user() && $this->user()->isSuperAdmin();
+        $user = $this->user();
+        if (!$user) return false;
+        return $user->isSuperAdmin() || $user->hasPermission('roles.edit');
     }
 
     /**
@@ -26,7 +28,6 @@ class UpdateRoleRequest extends FormRequest
             'name' => ['sometimes', 'required', 'string', 'max:255', Rule::unique('roles', 'name')->ignore($roleId)],
             'display_name' => 'sometimes|required|string|max:255',
             'description' => 'nullable|string',
-            'level' => 'nullable|integer|min:1|max:3',
             'permissions' => 'nullable|array',
             'permissions.*' => 'exists:permissions,id',
         ];

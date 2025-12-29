@@ -22,7 +22,6 @@ export default function RolesPage() {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
-  const [filterLevel, setFilterLevel] = useState('');
 
   // Debounce search
   const debouncedSetSearch = useMemo(
@@ -38,14 +37,13 @@ export default function RolesPage() {
   };
 
   const { data, isLoading } = useQuery({
-    queryKey: ['roles', page, debouncedSearch, filterLevel],
+    queryKey: ['roles', page, debouncedSearch],
     queryFn: async () => {
       const params = {
         page,
         per_page: 15,
       };
       if (debouncedSearch.trim()) params.search = debouncedSearch.trim();
-      if (filterLevel) params.level = filterLevel;
       const response = await apiClient.get('/roles', { params });
       return response.data;
     },
@@ -74,17 +72,6 @@ export default function RolesPage() {
           <div className="font-medium text-gray-900">{row.display_name}</div>
           <div className="text-sm text-gray-500">{row.name}</div>
         </div>
-      ),
-    },
-    {
-      key: 'level',
-      header: 'Nivel',
-      render: (value) => (
-        <Badge
-          variant={value === 1 ? 'danger' : value === 2 ? 'warning' : 'info'}
-        >
-          {value === 1 ? 'Super Admin' : value === 2 ? 'Jefe de Área' : 'Personal'}
-        </Badge>
       ),
     },
     {
@@ -180,20 +167,6 @@ export default function RolesPage() {
               placeholder="Buscar roles..."
               value={search}
               onChange={handleSearchChange}
-            />
-            <Select
-              placeholder="Todos los niveles"
-              value={filterLevel}
-              onChange={(e) => {
-                setFilterLevel(e.target.value);
-                setPage(1);
-              }}
-              options={[
-                { value: '', label: 'Todos' },
-                { value: '1', label: 'Super Admin' },
-                { value: '2', label: 'Jefe de Área' },
-                { value: '3', label: 'Personal' },
-              ]}
             />
           </div>
         </Card>

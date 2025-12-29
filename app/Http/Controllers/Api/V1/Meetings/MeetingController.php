@@ -211,8 +211,21 @@ class MeetingController extends Controller
             'description' => 'nullable|string',
             'start_time' => 'sometimes|date',
             'end_time' => 'sometimes|date|after:start_time',
+            'location' => 'nullable|string',
+            'meeting_type' => 'sometimes|in:internal,external,client',
+            'area_id' => 'nullable|exists:areas,id',
+            'attendees' => 'nullable|array',
+            'attendees.*' => 'exists:users,id',
+            'agenda' => 'nullable|string',
+            'meeting_link' => 'nullable|url',
+            'send_reminders' => 'nullable|boolean',
             'status' => 'sometimes|in:scheduled,in_progress,completed,cancelled',
         ]);
+
+        // Asegurar que attendees sea un array (puede estar vacío)
+        if (isset($validated['attendees'])) {
+            $validated['attendees'] = $validated['attendees'] ?? [];
+        }
 
         $meeting->update($validated);
 

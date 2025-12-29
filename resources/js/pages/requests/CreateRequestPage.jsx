@@ -10,7 +10,7 @@ import Card from '../../components/common/Card';
 import Input from '../../components/common/Input';
 import Select from '../../components/common/Select';
 import Textarea from '../../components/common/Textarea';
-import { formatDate } from '../../utils/formatters';
+import { formatDate, formatDateForInput, calculateDaysBetween } from '../../utils/formatters';
 import toast from 'react-hot-toast';
 import useAuthStore from '../../store/authStore';
 
@@ -61,12 +61,18 @@ export default function CreateRequestPage() {
           type: requestData.type || '',
           title: requestData.title || '',
           description: requestData.description || '',
-          start_date: requestData.start_date || '',
-          end_date: requestData.end_date || '',
+          start_date: formatDateForInput(requestData.start_date) || '',
+          end_date: formatDateForInput(requestData.end_date) || '',
           start_time: requestData.start_time || '',
           end_time: requestData.end_time || '',
           days_requested: requestData.days_requested?.toString() || '',
         };
+
+        // Recalcular días si hay fechas
+        if (newFormData.start_date) {
+          const calculatedDays = calculateDaysBetween(newFormData.start_date, newFormData.end_date);
+          newFormData.days_requested = calculatedDays.toString();
+        }
 
         console.log('CreateRequestPage - Setting form data:', newFormData);
         setFormData(newFormData);
@@ -96,15 +102,27 @@ export default function CreateRequestPage() {
   });
 
   // Calcular días automáticamente cuando cambian las fechas
-  const calculateDays = () => {
-    if (formData.start_date && formData.end_date) {
-      const start = new Date(formData.start_date);
-      const end = new Date(formData.end_date);
-      const diffTime = Math.abs(end - start);
-      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
-      setFormData(prev => ({ ...prev, days_requested: diffDays.toString() }));
+  useEffect(() => {
+    if (formData.start_date) {
+      const calculatedDays = calculateDaysBetween(formData.start_date, formData.end_date);
+      setFormData(prev => {
+        // Solo actualizar si el valor calculado es diferente al actual
+        if (prev.days_requested !== calculatedDays.toString()) {
+          return { ...prev, days_requested: calculatedDays.toString() };
+        }
+        return prev;
+      });
+    } else {
+      // Si no hay fecha inicio, limpiar días
+      setFormData(prev => {
+        if (prev.days_requested) {
+          return { ...prev, days_requested: '' };
+        }
+        return prev;
+      });
     }
-  };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formData.start_date, formData.end_date]);
 
   // Mutation para crear/actualizar
   const mutation = useMutation({
@@ -149,11 +167,7 @@ export default function CreateRequestPage() {
   const handleChange = (e) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
-
-    // Calcular días cuando cambian las fechas
-    if ((name === 'start_date' || name === 'end_date') && formData.start_date && formData.end_date) {
-      setTimeout(calculateDays, 100);
-    }
+    // El cálculo de días se hace automáticamente con useEffect
   };
 
   if (isEdit && loadingRequest) {

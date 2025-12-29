@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowLeftIcon,
@@ -7,6 +7,7 @@ import {
   TrashIcon,
   ShieldCheckIcon,
   UsersIcon,
+  MagnifyingGlassIcon,
 } from '@heroicons/react/24/outline';
 import AppLayout from '../../layouts/AppLayout';
 import apiClient from '../../api/client';
@@ -16,8 +17,16 @@ import Badge from '../../components/common/Badge';
 import Loading from '../../components/common/Loading';
 import Alert from '../../components/common/Alert';
 import Modal from '../../components/common/Modal';
+import Input from '../../components/common/Input';
 import toast from 'react-hot-toast';
 import useAuthStore from '../../store/authStore';
+
+function normalizeText(v) {
+  return String(v || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+}
 
 export default function RoleDetailPage() {
   const navigate = useNavigate();
@@ -28,6 +37,7 @@ export default function RoleDetailPage() {
   const hasPermission = useAuthStore((state) => state.hasPermission);
 
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [permSearch, setPermSearch] = useState('');
 
   // Obtener rol
   const { data: roleData, isLoading: loadingRole, error: roleError } = useQuery({
@@ -40,11 +50,11 @@ export default function RoleDetailPage() {
     retry: 1,
   });
 
-  const role = roleData;
+  const role = roleData || null;
 
-  // Verificar permisos
-  const canEdit = role && (isSuperAdmin() || hasPermission('roles.edit'));
-  const canDelete = role && (isSuperAdmin() || hasPermission('roles.delete')) && !['super_admin', 'jefe_area', 'personal'].includes(role.name);
+  // Verificar permisos (ojo: role puede ser null en render inicial)
+  const canEdit = !!role && (isSuperAdmin() || hasPermission('roles.edit'));
+  const canDelete = !!role && (isSuperAdmin() || hasPermission('roles.delete')) && !['super_admin', 'jefe_area', 'personal'].includes(role?.name);
 
   // Mutation para eliminar
   const deleteMutation = useMutation({
@@ -66,6 +76,22 @@ export default function RoleDetailPage() {
     deleteMutation.mutate();
     setShowDeleteModal(false);
   };
+
+  // Agrupar permisos por módulo (DEBE ir antes de returns condicionales para no romper orden de hooks)
+  const permissionsByModule = useMemo(() => {
+    const s = normalizeText(permSearch);
+    const perms = role?.permissions || [];
+    const filtered = !s
+      ? perms
+      : perms.filter((p) => normalizeText(`${p.display_name} ${p.name} ${p.module}`).includes(s));
+
+    return filtered.reduce((acc, perm) => {
+      const mod = perm.module || 'otros';
+      if (!acc[mod]) acc[mod] = [];
+      acc[mod].push(perm);
+      return acc;
+    }, {});
+  }, [role?.permissions, permSearch]);
 
   // Loading state
   if (loadingRole) {
@@ -90,15 +116,6 @@ export default function RoleDetailPage() {
       </AppLayout>
     );
   }
-
-  // Agrupar permisos por módulo
-  const permissionsByModule = (role.permissions || []).reduce((acc, perm) => {
-    if (!acc[perm.module]) {
-      acc[perm.module] = [];
-    }
-    acc[perm.module].push(perm);
-    return acc;
-  }, {});
 
   return (
     <AppLayout>
@@ -171,16 +188,6 @@ export default function RoleDetailPage() {
                     <p className="text-sm text-gray-900">{role.description}</p>
                   </div>
                 )}
-                <div>
-                  <label className="block text-sm font-medium text-gray-500 mb-1">
-                    Nivel
-                  </label>
-                  <Badge
-                    variant={role.level === 1 ? 'danger' : role.level === 2 ? 'warning' : 'info'}
-                  >
-                    {role.level_label}
-                  </Badge>
-                </div>
               </dl>
             </div>
 
@@ -211,17 +218,30 @@ export default function RoleDetailPage() {
               <ShieldCheckIcon className="h-5 w-5" />
               Permisos Asignados ({role.permissions.length})
             </h2>
+            <div className="mb-4">
+              <Input
+                icon={MagnifyingGlassIcon}
+                placeholder="Buscar permisos por nombre o módulo…"
+                value={permSearch}
+                onChange={(e) => setPermSearch(e.target.value)}
+              />
+            </div>
             <div className="space-y-4">
-              {Object.entries(permissionsByModule).map(([module, perms]) => (
+              {Object.entries(permissionsByModule).length === 0 ? (
+                <div className="p-4 rounded-lg border border-dashed border-gray-300 text-sm text-gray-600">
+                  No hay permisos que coincidan con la búsqueda.
+                </div>
+              ) : Object.entries(permissionsByModule).map(([module, perms]) => (
                 <div key={module}>
                   <h3 className="text-sm font-semibold text-gray-700 mb-2 capitalize">
                     {module.replace('_', ' ')}
                   </h3>
-                  <div className="flex flex-wrap gap-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     {perms.map((perm) => (
-                      <Badge key={perm.id} variant="info">
-                        {perm.display_name}
-                      </Badge>
+                      <div key={perm.id} className="rounded-lg border border-gray-200 bg-white p-3">
+                        <div className="text-sm font-semibold text-gray-900">{perm.display_name}</div>
+                        <div className="text-xs text-gray-500 font-mono break-all mt-1">{perm.name}</div>
+                      </div>
                     ))}
                   </div>
                 </div>

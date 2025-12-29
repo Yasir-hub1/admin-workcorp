@@ -12,12 +12,37 @@ use Illuminate\Http\Request;
 
 class ClientController extends Controller
 {
+    private function applyVisibilityScope(Request $request, $query)
+    {
+        $user = $request->user();
+        if (!$user) return $query;
+
+        // Super admin: vista total
+        if ($user->hasRole('super_admin') || $user->hasPermission('clients.view-all')) {
+            return $query;
+        }
+
+        // Vista por área
+        if ($user->hasPermission('clients.view-area')) {
+            $areaId = $user->area_id;
+            if ($areaId) {
+                return $query->where('area_id', $areaId);
+            }
+            // fallback seguro si no tiene área asignada
+            return $query->where('assigned_to', $user->id);
+        }
+
+        // Vista propia (default)
+        return $query->where('assigned_to', $user->id);
+    }
+
     /**
      * Display a listing of clients.
      */
     public function index(Request $request): JsonResponse
     {
         $query = Client::with(['area', 'assignedUser', 'contacts', 'services']);
+        $query = $this->applyVisibilityScope($request, $query);
 
         // Filters - solo aplicar si tienen valor
         if ($request->has('area_id') && !empty($request->area_id)) {
@@ -65,7 +90,7 @@ class ClientController extends Controller
         $clients = $query->latest('registration_date')->paginate($perPage);
 
         // Obtener estadísticas
-        $statsQuery = Client::query();
+        $statsQuery = $this->applyVisibilityScope($request, Client::query());
         $totalClients = $statsQuery->count();
         $activeClients = $statsQuery->clone()->where('status', 'active')->count();
         $byStatus = $statsQuery->clone()
@@ -132,7 +157,10 @@ class ClientController extends Controller
      */
     public function show($id): JsonResponse
     {
-        $client = Client::with(['area', 'assignedUser', 'contacts', 'services'])->find($id);
+        $client = $this->applyVisibilityScope(
+            request(),
+            Client::with(['area', 'assignedUser', 'contacts', 'services'])
+        )->where('id', $id)->first();
 
         if (!$client) {
             return response()->json([
@@ -161,42 +189,65 @@ class ClientController extends Controller
             ], 404);
         }
 
-        // Load all related data
-        $services = $client->services()
-            ->with(['renewals', 'payments.receivedBy', 'incidents', 'assignedUser', 'area'])
+        // Load all related data (Kardex: servicios adquiridos)
+        $clientServices = $client->services()
+            ->with(['service', 'renewals', 'payments.receivedBy', 'incidents', 'assignedUser', 'area'])
             ->orderBy('start_date', 'desc')
+            ->orderBy('created_at', 'desc')
             ->get();
 
         // Build kardex entries
         $kardex = [];
 
-        foreach ($services as $service) {
+        foreach ($clientServices as $cs) {
+            $catalogName = $cs->service?->name ?? 'Servicio';
+            $servicePayload = [
+                // id de kardex (client_service)
+                'id' => $cs->id,
+                'service_id' => $cs->service_id,
+                'name' => $catalogName,
+                'status' => $cs->status,
+                'start_date' => $cs->start_date?->format('Y-m-d'),
+                'end_date' => $cs->end_date?->format('Y-m-d'),
+                'contract_amount' => $cs->contract_amount !== null ? (float) $cs->contract_amount : null,
+                'payment_frequency' => $cs->payment_frequency,
+                'assigned_user' => $cs->assignedUser ? [
+                    'id' => $cs->assignedUser->id,
+                    'name' => $cs->assignedUser->name,
+                ] : null,
+                'area' => $cs->area ? [
+                    'id' => $cs->area->id,
+                    'name' => $cs->area->name,
+                ] : null,
+                'catalog' => $cs->service ? [
+                    'id' => $cs->service->id,
+                    'name' => $cs->service->name,
+                    'code' => $cs->service->code,
+                    'category' => $cs->service->category,
+                    'billing_type' => $cs->service->billing_type,
+                    'price' => $cs->service->price !== null ? (float) $cs->service->price : null,
+                ] : null,
+            ];
+
             // Service creation
-            if ($service->start_date) {
+            if ($cs->start_date) {
                 $kardex[] = [
                     'type' => 'service_created',
-                    'date' => $service->start_date->format('Y-m-d'),
-                    'description' => "Servicio creado: {$service->name}",
-                    'amount' => $service->contract_amount ? (float) $service->contract_amount : null,
-                    'service' => [
-                        'id' => $service->id,
-                        'name' => $service->name,
-                        'status' => $service->status,
-                    ],
+                    'date' => $cs->start_date->format('Y-m-d'),
+                    'description' => "Servicio adquirido: {$catalogName}",
+                    'amount' => $cs->contract_amount ? (float) $cs->contract_amount : null,
+                    'service' => $servicePayload,
                 ];
             }
 
             // Renewals
-            foreach ($service->renewals as $renewal) {
+            foreach ($cs->renewals as $renewal) {
                 $kardex[] = [
                     'type' => 'service_renewal',
                     'date' => $renewal->renewal_date ? $renewal->renewal_date->format('Y-m-d') : null,
-                    'description' => "Renovación de servicio: {$service->name}",
+                    'description' => "Renovación de servicio: {$catalogName}",
                     'amount' => $renewal->renewal_amount ? (float) $renewal->renewal_amount : null,
-                    'service' => [
-                        'id' => $service->id,
-                        'name' => $service->name,
-                    ],
+                    'service' => $servicePayload,
                     'renewal' => [
                         'id' => $renewal->id,
                         'notes' => $renewal->notes,
@@ -205,11 +256,11 @@ class ClientController extends Controller
             }
 
             // Payments
-            foreach ($service->payments as $payment) {
+            foreach ($cs->payments as $payment) {
                 $kardex[] = [
                     'type' => 'payment',
                     'date' => $payment->payment_date ? $payment->payment_date->format('Y-m-d') : null,
-                    'description' => "Pago recibido: {$service->name}",
+                    'description' => "Pago recibido: {$catalogName}",
                     'amount' => $payment->amount ? (float) $payment->amount : null,
                     'payment_method' => $payment->payment_method,
                     'invoice_number' => $payment->invoice_number,
@@ -217,29 +268,23 @@ class ClientController extends Controller
                         'id' => $payment->receivedBy->id,
                         'name' => $payment->receivedBy->name,
                     ] : null,
-                    'service' => [
-                        'id' => $service->id,
-                        'name' => $service->name,
-                    ],
+                    'service' => $servicePayload,
                 ];
             }
 
             // Incidents
-            foreach ($service->incidents as $incident) {
+            foreach ($cs->incidents as $incident) {
                 $kardex[] = [
                     'type' => 'incident',
                     'date' => $incident->incident_date ? $incident->incident_date->format('Y-m-d') : null,
-                    'description' => "Incidencia reportada: {$service->name}",
+                    'description' => "Incidencia reportada: {$catalogName}",
                     'incident' => [
                         'id' => $incident->id,
-                        'type' => $incident->type,
+                        'type' => $incident->severity,
                         'description' => $incident->description,
                         'status' => $incident->status,
                     ],
-                    'service' => [
-                        'id' => $service->id,
-                        'name' => $service->name,
-                    ],
+                    'service' => $servicePayload,
                 ];
             }
         }
@@ -252,15 +297,34 @@ class ClientController extends Controller
         });
 
         // Calculate summary
-        $totalServices = $services->count();
-        $activeServices = $services->where('status', 'active')->count();
-        $totalPayments = $services->sum(function ($service) {
+        $totalServices = $clientServices->count();
+        $today = now()->startOfDay();
+        $activeServices = $clientServices->filter(function ($s) use ($today) {
+            // status null (data vieja) => tratar como active
+            $status = $s->status ?? 'active';
+            if ($status !== 'active' && $status !== 'expiring') return false;
+            if ($s->end_date && $s->end_date->copy()->startOfDay()->lt($today)) return false;
+            return true;
+        })->count();
+        $expiringServices = $clientServices->filter(function ($s) use ($today) {
+            $end = $s->end_date ? $s->end_date->copy()->startOfDay() : null;
+            if (!$end) return false;
+            return $end->gte($today) && $end->lte($today->copy()->addDays(15));
+        })->count();
+        $expiredServices = $clientServices->filter(function ($s) use ($today) {
+            $end = $s->end_date ? $s->end_date->copy()->startOfDay() : null;
+            return $end ? $end->lt($today) : false;
+        })->count();
+        $totalPayments = $clientServices->sum(function ($service) {
             return $service->payments->sum('amount');
         });
-        $totalRenewals = $services->sum(function ($service) {
+        $totalContractAmount = $clientServices->sum(function ($service) {
+            return $service->contract_amount ?? 0;
+        });
+        $totalRenewals = $clientServices->sum(function ($service) {
             return $service->renewals->count();
         });
-        $totalIncidents = $services->sum(function ($service) {
+        $totalIncidents = $clientServices->sum(function ($service) {
             return $service->incidents->count();
         });
 
@@ -268,11 +332,44 @@ class ClientController extends Controller
             'success' => true,
             'data' => [
                 'client' => new ClientResource($client),
+                'client_services' => $clientServices->map(function ($cs) {
+                    return [
+                        'id' => $cs->id,
+                        'client_id' => $cs->client_id,
+                        'service_id' => $cs->service_id,
+                        'service' => $cs->service ? [
+                            'id' => $cs->service->id,
+                            'name' => $cs->service->name,
+                            'code' => $cs->service->code,
+                            'category' => $cs->service->category,
+                            'billing_type' => $cs->service->billing_type,
+                            'price' => $cs->service->price !== null ? (float) $cs->service->price : null,
+                        ] : null,
+                        'start_date' => $cs->start_date?->format('Y-m-d'),
+                        'end_date' => $cs->end_date?->format('Y-m-d'),
+                        'contract_amount' => $cs->contract_amount !== null ? (float) $cs->contract_amount : null,
+                        'payment_frequency' => $cs->payment_frequency,
+                        'status' => $cs->status,
+                        'auto_renewal' => (bool) ($cs->auto_renewal ?? false),
+                        'billing_day' => $cs->billing_day,
+                        'assigned_user' => $cs->assignedUser ? [
+                            'id' => $cs->assignedUser->id,
+                            'name' => $cs->assignedUser->name,
+                        ] : null,
+                        'area' => $cs->area ? [
+                            'id' => $cs->area->id,
+                            'name' => $cs->area->name,
+                        ] : null,
+                    ];
+                })->values(),
                 'kardex' => $kardex,
                 'summary' => [
                     'total_services' => $totalServices,
                     'active_services' => $activeServices,
+                    'expiring_services' => $expiringServices,
+                    'expired_services' => $expiredServices,
                     'total_payments' => (float) $totalPayments,
+                    'total_contract_amount' => (float) $totalContractAmount,
                     'total_renewals' => $totalRenewals,
                     'total_incidents' => $totalIncidents,
                 ],
@@ -339,7 +436,7 @@ class ClientController extends Controller
      */
     public function statistics(Request $request): JsonResponse
     {
-        $query = Client::query();
+        $query = $this->applyVisibilityScope($request, Client::query());
 
         if ($request->has('area_id')) {
             $query->where('area_id', $request->area_id);
@@ -361,10 +458,13 @@ class ClientController extends Controller
             ->groupBy('category')
             ->get();
 
-        $byArea = Client::with('area')
-            ->selectRaw('area_id, COUNT(*) as count')
-            ->groupBy('area_id')
-            ->get();
+        $byArea = [];
+        if ($request->user()?->hasRole('super_admin') || $request->user()?->hasPermission('clients.view-all')) {
+            $byArea = Client::with('area')
+                ->selectRaw('area_id, COUNT(*) as count')
+                ->groupBy('area_id')
+                ->get();
+        }
 
         return response()->json([
             'success' => true,

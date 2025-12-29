@@ -52,4 +52,19 @@ class StoreStaffRequest extends FormRequest
             'salary_notes' => 'nullable|string',
         ];
     }
+
+    public function messages(): array
+    {
+        return [
+            'first_name.required' => 'El nombre es obligatorio.',
+            'last_name.required' => 'El apellido es obligatorio.',
+            'document_type.required' => 'El tipo de documento es obligatorio.',
+            'document_number.required' => 'El número de documento es obligatorio.',
+            'document_number.unique' => 'Este número de documento ya está registrado. Por favor, verifica el número.',
+            'hire_date.required' => 'La fecha de ingreso es obligatoria.',
+            'hire_date.date' => 'La fecha de ingreso debe ser una fecha válida.',
+            'employee_number.unique' => 'Este número de empleado ya está en uso. Por favor, utiliza otro número.',
+            'user_id.unique' => 'Este usuario ya está asignado a otro personal.',
+        ];
+    }
 }

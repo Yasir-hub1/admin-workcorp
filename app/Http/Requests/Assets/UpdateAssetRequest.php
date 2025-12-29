@@ -14,11 +14,17 @@ class UpdateAssetRequest extends FormRequest
 
     public function rules(): array
     {
-        $assetId = $this->route('asset')->id ?? null;
+        // Obtener el ID del activo desde la ruta
+        $assetId = $this->route('id');
 
         return [
             'name' => 'sometimes|required|string|max:255',
-            'code' => ['nullable', 'string', 'max:255', Rule::unique('assets', 'code')->ignore($assetId)],
+            'code' => [
+                'nullable', 
+                'string', 
+                'max:255', 
+                Rule::unique('assets', 'code')->ignore($assetId)->whereNull('deleted_at')
+            ],
             'serial_number' => 'nullable|string|max:255',
             'category' => 'sometimes|required|string|max:255',
             'brand' => 'nullable|string|max:255',

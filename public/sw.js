@@ -31,18 +31,35 @@ self.addEventListener('push', (event) => {
   };
 
   event.waitUntil(
-    self.registration.showNotification(title, {
-      body,
-      icon,
-      badge,
-      tag,
-      requireInteraction,
-      data,
-      actions: [
-        { action: 'open', title: 'Abrir' },
-        { action: 'close', title: 'Cerrar' },
-      ],
-    })
+    Promise.all([
+      self.registration.showNotification(title, {
+        body,
+        icon,
+        badge,
+        tag,
+        requireInteraction,
+        data,
+        actions: [
+          { action: 'open', title: 'Abrir' },
+          { action: 'close', title: 'Cerrar' },
+        ],
+      }),
+      // Si la app está abierta, avisar a las pestañas para que puedan reproducir sonido
+      self.clients
+        .matchAll({ type: 'window', includeUncontrolled: true })
+        .then((clientList) => {
+          for (const client of clientList) {
+            try {
+              client.postMessage({
+                type: 'PUSH_RECEIVED',
+                payload: { title, body, data },
+              });
+            } catch (e) {
+              // ignore
+            }
+          }
+        }),
+    ])
   );
 });
 

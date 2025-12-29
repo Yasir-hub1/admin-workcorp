@@ -21,6 +21,7 @@ import Loading from '../../components/common/Loading';
 import Alert from '../../components/common/Alert';
 import { formatDate, formatDateTime } from '../../utils/formatters';
 import toast from 'react-hot-toast';
+import { playNotificationSound } from '../../utils/notificationSound';
 import useAuthStore from '../../store/authStore';
 
 export default function MeetingDetailPage() {
@@ -109,6 +110,7 @@ export default function MeetingDetailPage() {
     },
     onSuccess: () => {
       toast.success('Notificación push reenviada');
+      playNotificationSound({ frequency: 740, durationMs: 110 });
     },
     onError: (error) => {
       toast.error(error.response?.data?.message || 'Error al reenviar notificación');

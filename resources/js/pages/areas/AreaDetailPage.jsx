@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowLeftIcon,
@@ -18,6 +18,7 @@ import Badge from '../../components/common/Badge';
 import Loading from '../../components/common/Loading';
 import Alert from '../../components/common/Alert';
 import Modal from '../../components/common/Modal';
+import MultiSelect from '../../components/common/MultiSelect';
 import { formatCurrency } from '../../utils/formatters';
 import toast from 'react-hot-toast';
 import useAuthStore from '../../store/authStore';
@@ -28,8 +29,11 @@ export default function AreaDetailPage() {
   const queryClient = useQueryClient();
   const { isAuthenticated, user } = useAuthStore();
   const isSuperAdmin = useAuthStore((state) => state.isSuperAdmin);
+  const hasPermission = useAuthStore((state) => state.hasPermission);
 
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [showAssignModal, setShowAssignModal] = useState(false);
+  const [selectedStaffIds, setSelectedStaffIds] = useState([]);
 
   // Obtener área
   const { data: areaData, isLoading: loadingArea, error: areaError } = useQuery({
@@ -47,6 +51,38 @@ export default function AreaDetailPage() {
   // Verificar permisos
   const canEdit = area && isSuperAdmin();
   const canDelete = area && isSuperAdmin();
+  const canAssignStaff = isSuperAdmin() || hasPermission('areas.assign-members');
+
+  // Obtener personal activo para asignación
+  const { data: staffData } = useQuery({
+    queryKey: ['staff-for-area-members'],
+    queryFn: async () => {
+      const response = await apiClient.get('/staff', { params: { is_active: true, per_page: 1000 } });
+      return response.data.data || [];
+    },
+    enabled: !!area && isAuthenticated && !!user && canAssignStaff,
+  });
+
+  const staffOptions = useMemo(() => {
+    if (!staffData) return [];
+    return staffData.map((s) => {
+      const fullName = `${s.first_name || ''} ${s.last_name || ''}`.trim();
+      const display = fullName || s.full_name || s.user?.name || s.user?.email || (s.employee_number ? `N° ${s.employee_number}` : 'Sin nombre');
+      const position = s.position ? ` - ${s.position}` : '';
+      return { value: String(s.id), label: `${display}${position}` };
+    });
+  }, [staffData]);
+
+  const currentStaffIds = useMemo(() => {
+    const list = (area?.staff_members || area?.staffMembers || []).map((s) => String(s.id));
+    return list;
+  }, [area]);
+
+  // Inicializar selección cuando se abre el modal (siempre antes de returns para no romper orden de hooks)
+  useEffect(() => {
+    if (!showAssignModal) return;
+    setSelectedStaffIds(currentStaffIds);
+  }, [showAssignModal, currentStaffIds]);
 
   // Mutation para eliminar
   const deleteMutation = useMutation({
@@ -68,6 +104,23 @@ export default function AreaDetailPage() {
     deleteMutation.mutate();
     setShowDeleteModal(false);
   };
+
+  const assignStaffMutation = useMutation({
+    mutationFn: async (staffIds) => {
+      const response = await apiClient.post(`/areas/${id}/staff-members`, {
+        staff_ids: staffIds.map((v) => parseInt(v, 10)),
+      });
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries(['area', id]);
+      toast.success('Personal asignado correctamente');
+      setShowAssignModal(false);
+    },
+    onError: (error) => {
+      toast.error(error.response?.data?.message || 'Error al asignar personal');
+    },
+  });
 
   // Loading state
   if (loadingArea) {
@@ -146,6 +199,41 @@ export default function AreaDetailPage() {
             <div>
               <h2 className="text-lg font-semibold text-gray-900 mb-4">Información General</h2>
               <dl className="space-y-3">
+                {/* Logo */}
+                {area.logo_path && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-500 mb-2">
+                      Logo
+                    </label>
+                    <img
+                      src={`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/storage/${area.logo_path}`}
+                      alt={`Logo de ${area.name}`}
+                      className="h-24 w-24 object-contain border border-gray-300 rounded-lg p-2 bg-white"
+                    />
+                  </div>
+                )}
+                
+                {/* Colores */}
+                {area.colors && Array.isArray(area.colors) && area.colors.length > 0 && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-500 mb-2">
+                      Colores del Área
+                    </label>
+                    <div className="flex flex-wrap gap-3">
+                      {area.colors.map((color, index) => (
+                        <div key={index} className="flex items-center gap-2">
+                          <div
+                            className="w-10 h-10 rounded border border-gray-300 shadow-sm"
+                            style={{ backgroundColor: color }}
+                            title={color}
+                          />
+                          <span className="text-xs text-gray-600 font-mono">{color}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 <div>
                   <label className="block text-sm font-medium text-gray-500 mb-1">
                     Nombre
@@ -243,14 +331,27 @@ export default function AreaDetailPage() {
         )}
 
         {/* Personal Asignado */}
-        {(area.staff_members && area.staff_members.length > 0) || (area.staff && area.staff.length > 0) ? (
-          <Card>
-            <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+        <Card>
+          <div className="flex items-center justify-between gap-3 mb-4">
+            <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
               <BuildingOfficeIcon className="h-5 w-5" />
               Personal Asignado
             </h2>
+            {canAssignStaff && (
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setShowAssignModal(true);
+                }}
+              >
+                Asignar personal
+              </Button>
+            )}
+          </div>
+
+          {(area.staff_members && area.staff_members.length > 0) ? (
             <div className="space-y-2">
-              {(area.staff_members || area.staff || []).map((staff) => {
+              {area.staff_members.map((staff) => {
                 const fullName = staff.first_name || staff.last_name
                   ? `${staff.first_name || ''} ${staff.last_name || ''}`.trim()
                   : staff.full_name || staff.name || staff.email || staff.employee_number || 'Sin nombre';
@@ -265,6 +366,31 @@ export default function AreaDetailPage() {
                   </div>
                 );
               })}
+            </div>
+          ) : (
+            <div className="text-sm text-gray-500">
+              No hay personal asignado a esta área.
+            </div>
+          )}
+          <div className="mt-3 text-xs text-gray-500">
+            Nota: un personal puede pertenecer a <span className="font-semibold">varias áreas</span>.
+          </div>
+        </Card>
+
+        {/* (legacy) staff por users.area_id */}
+        {(area.staff && area.staff.length > 0) ? (
+          <Card>
+            <h3 className="text-sm font-semibold text-gray-900 mb-2">Personal (relación antigua)</h3>
+            <div className="text-xs text-gray-500 mb-3">
+              Esta lista viene de <span className="font-mono">users.area_id</span>. Para multi-área usa la asignación anterior.
+            </div>
+            <div className="space-y-2">
+              {area.staff.map((u) => (
+                <div key={u.id} className="p-2 border border-gray-200 rounded">
+                  <div className="text-sm font-medium text-gray-900">{u.name}</div>
+                  <div className="text-xs text-gray-500">{u.email}</div>
+                </div>
+              ))}
             </div>
           </Card>
         ) : null}
@@ -300,6 +426,44 @@ export default function AreaDetailPage() {
             Esta área tiene {area.children.length} sub-área(s). No se puede eliminar hasta que se eliminen o reasignen las sub-áreas.
           </Alert>
         )}
+      </Modal>
+
+      {/* Assign Personal Modal */}
+      <Modal
+        open={showAssignModal}
+        onClose={() => setShowAssignModal(false)}
+        title="Asignar personal a esta área"
+        size="lg"
+        footer={
+          <>
+            <Button variant="outline" onClick={() => setShowAssignModal(false)}>
+              Cancelar
+            </Button>
+            <Button
+              onClick={() => assignStaffMutation.mutate(selectedStaffIds)}
+              loading={assignStaffMutation.isPending}
+            >
+              Guardar asignación
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-3">
+          <div className="text-sm text-gray-600">
+            Selecciona el personal que pertenece a <span className="font-semibold">{area.name}</span>. Un mismo personal puede estar en varias áreas.
+          </div>
+          <MultiSelect
+            name="area_staff_members"
+            label="Personal"
+            value={selectedStaffIds}
+            onChange={(values) => setSelectedStaffIds(values)}
+            options={staffOptions}
+            placeholder="Buscar y seleccionar personal..."
+          />
+          <div className="text-xs text-gray-500">
+            Consejo: si no ves a alguien, verifica que esté activo en el módulo Personal.
+          </div>
+        </div>
       </Modal>
     </AppLayout>
   );

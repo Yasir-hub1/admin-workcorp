@@ -8,6 +8,10 @@ import { usePushNotifications } from '../hooks/usePushNotifications';
 import { pushNotificationService } from '../services/pushNotificationService';
 import apiClient from '../api/client';
 import toast from 'react-hot-toast';
+import { initNotificationAudio, playNotificationSound } from '../utils/notificationSound';
+import { initNotificationVoice, speakNotificationReminder } from '../utils/notificationVoice';
+import SupportCalendarModal from '../components/support/SupportCalendarModal';
+import NotesWidget from '../components/notes/NotesWidget';
 import {
   HomeIcon,
   BuildingOfficeIcon,
@@ -79,7 +83,7 @@ const navigation = [
     name: 'Clientes',
     href: '/clients',
     icon: UserGroupIcon,
-    anyPermissions: ['clients.view-all', 'clients.view-area', 'clients.view-own', 'clients.create'],
+    anyPermissions: ['clients.view-detail', 'clients.view-all', 'clients.view-area', 'clients.view-own', 'clients.create'],
   },
   {
     name: 'Servicios',
@@ -112,13 +116,27 @@ export default function AppLayout({ children }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
+  const [supportCalendarOpen, setSupportCalendarOpen] = useState(false);
   const notifRef = useRef(null);
   const location = useLocation();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { logoutMutation } = useAuth();
   const { user, isSuperAdmin, isJefeArea, isPersonal, hasPermission } = useAuthStore();
-  
+  const canManageSupportCalendar = isSuperAdmin() || hasPermission('support_calendar.manage');
+
+  const { data: supportCalendarAccessData } = useQuery({
+    queryKey: ['support-calendar', 'access'],
+    queryFn: async () => {
+      const res = await apiClient.get('/support-calendar/access');
+      return res.data.data;
+    },
+    enabled: !!user,
+    staleTime: 60000,
+  });
+
+  const canViewSupportCalendar = !!(supportCalendarAccessData?.can_view || canManageSupportCalendar);
+
   // Inicializar push notifications para admins y jefes de área
   usePushNotifications(user && (isSuperAdmin() || isJefeArea()));
 
@@ -134,6 +152,8 @@ export default function AppLayout({ children }) {
   });
 
   const unreadCount = unreadCountData || 0;
+  const prevUnreadRef = useRef(0);
+  const voiceLastSpokenRef = useRef(0);
 
   const { data: recentNotificationsData, isLoading: isLoadingRecent } = useQuery({
     queryKey: ['notifications', 'recent'],
@@ -177,12 +197,82 @@ export default function AppLayout({ children }) {
     const checkMobile = () => {
       setIsMobile(window.innerWidth < 1024); // lg breakpoint
     };
-    
+
     checkMobile();
     window.addEventListener('resize', checkMobile);
-    
+
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
+
+  // Desbloquear audio en el primer gesto del usuario (requisito del navegador)
+  useEffect(() => {
+    const unlock = () => {
+      initNotificationAudio();
+      initNotificationVoice();
+      window.removeEventListener('pointerdown', unlock);
+      window.removeEventListener('keydown', unlock);
+    };
+    window.addEventListener('pointerdown', unlock, { once: true });
+    window.addEventListener('keydown', unlock, { once: true });
+    return () => {
+      window.removeEventListener('pointerdown', unlock);
+      window.removeEventListener('keydown', unlock);
+    };
+  }, []);
+
+  // Sonido cuando llegan nuevas notificaciones (sube el contador)
+  useEffect(() => {
+    const prev = prevUnreadRef.current;
+    // No sonar en primer render (prev=0) si el usuario ya tenía notificaciones acumuladas
+    if (prev > 0 && unreadCount > prev) {
+      playNotificationSound();
+      if (unreadCount > 0) {
+        speakNotificationReminder(`Tienes ${unreadCount} notificaciones por leer`);
+      }
+    }
+    prevUnreadRef.current = unreadCount;
+  }, [unreadCount]);
+
+  // Voz recordatoria: si el usuario tiene notificaciones por leer, repetir cada ~10 min mientras esté en la app
+  useEffect(() => {
+    if (!user) return;
+    if (!(isSuperAdmin() || hasPermission('notifications.view'))) return;
+    if (!unreadCount || unreadCount <= 0) return;
+
+    const now = Date.now();
+    if (voiceLastSpokenRef.current === 0) {
+      // Primer aviso en sesión (no spamear si ya venía con acumuladas: esperamos a que haya gesto de usuario)
+      voiceLastSpokenRef.current = now;
+      speakNotificationReminder(`Tienes ${unreadCount} notificaciones por leer`);
+    }
+
+    const interval = window.setInterval(() => {
+      if (document.hidden) return;
+      const since = Date.now() - voiceLastSpokenRef.current;
+      if (since >= 10 * 60 * 1000) {
+        voiceLastSpokenRef.current = Date.now();
+        speakNotificationReminder(`Tienes ${unreadCount} notificaciones por leer`);
+      }
+    }, 30 * 1000);
+
+    return () => window.clearInterval(interval);
+  }, [user, unreadCount, isSuperAdmin, hasPermission]);
+
+  // Sonido cuando llega PUSH y la app está abierta (SW -> postMessage)
+  useEffect(() => {
+    if (!('serviceWorker' in navigator)) return;
+    const handler = (event) => {
+      if (event?.data?.type === 'PUSH_RECEIVED') {
+        playNotificationSound();
+        // Voz corta al recibir push (solo si hay permiso para ver notificaciones)
+        if (user && (isSuperAdmin() || hasPermission('notifications.view'))) {
+          speakNotificationReminder('Nueva notificación');
+        }
+      }
+    };
+    navigator.serviceWorker.addEventListener('message', handler);
+    return () => navigator.serviceWorker.removeEventListener('message', handler);
+  }, [user, isSuperAdmin, hasPermission]);
 
   // En desktop, el sidebar siempre debe estar visible
   useEffect(() => {
@@ -280,7 +370,7 @@ export default function AppLayout({ children }) {
               >
                 <div className="h-10 w-10 rounded-full bg-gradient-to-br from-indigo-400 to-purple-500 flex items-center justify-center shadow-md">
                   <span className="text-white font-semibold">
-                    {user?.name?.charAt(0).toUpperCase()}
+                    {(user?.name?.charAt(0)?.toUpperCase?.() || '?')}
                   </span>
                 </div>
               </motion.div>
@@ -412,6 +502,22 @@ export default function AppLayout({ children }) {
               )}
 
               {/* Icono de notificaciones en el top bar */}
+              {user && canViewSupportCalendar && (
+                <motion.button
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setSupportCalendarOpen(true);
+                  }}
+                  className="relative inline-flex items-center justify-center h-9 w-9 rounded-full border border-gray-200 bg-white text-gray-500 hover:text-indigo-600 hover:border-indigo-200 shadow-sm transition-colors"
+                  title="Calendario de soporte (sábados)"
+                >
+                  <CalendarDaysIcon className="h-5 w-5" />
+                </motion.button>
+              )}
+
               <div className="relative" ref={notifRef}>
                 <motion.button
                   whileHover={{ scale: 1.05 }}
@@ -530,6 +636,9 @@ export default function AppLayout({ children }) {
             </div>
           </div>
         </motion.div>
+
+        <SupportCalendarModal open={supportCalendarOpen} onClose={() => setSupportCalendarOpen(false)} />
+        <NotesWidget />
 
         {/* Page content */}
         <motion.main

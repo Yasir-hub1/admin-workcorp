@@ -265,4 +265,60 @@ class StaffController extends Controller
             'data' => new StaffSalaryResource($salary->load('approvedBy')),
         ], 201);
     }
+
+    /**
+     * Generate a unique employee number.
+     */
+    public function generateEmployeeNumber(Request $request): JsonResponse
+    {
+        $prefix = 'EMP';
+        $areaId = $request->input('area_id');
+        
+        // Si hay área seleccionada, usar su código como prefijo
+        if ($areaId) {
+            $area = \App\Models\Area::find($areaId);
+            if ($area && $area->code) {
+                $prefix = strtoupper($area->code);
+            }
+        }
+
+        // Buscar el último número de empleado con este prefijo
+        // Usar sintaxis compatible con PostgreSQL y MySQL
+        $dbDriver = \DB::connection()->getDriverName();
+        if ($dbDriver === 'pgsql') {
+            $lastEmployee = Staff::where('employee_number', 'like', $prefix . '-%')
+                ->orderByRaw('CAST(SUBSTRING(employee_number, ' . (strlen($prefix) + 2) . ') AS INTEGER) DESC')
+                ->first();
+        } else {
+            $lastEmployee = Staff::where('employee_number', 'like', $prefix . '-%')
+                ->orderByRaw('CAST(SUBSTRING(employee_number, ' . (strlen($prefix) + 2) . ') AS UNSIGNED) DESC')
+                ->first();
+        }
+
+        $nextNumber = 1;
+        if ($lastEmployee && $lastEmployee->employee_number) {
+            // Extraer el número del último employee_number
+            $parts = explode('-', $lastEmployee->employee_number);
+            if (count($parts) > 1 && is_numeric($parts[1])) {
+                $nextNumber = (int) $parts[1] + 1;
+            }
+        }
+
+        // Generar el nuevo número con padding de ceros (001, 002, etc.)
+        $employeeNumber = $prefix . '-' . str_pad($nextNumber, 3, '0', STR_PAD_LEFT);
+
+        // Verificar que sea único (por si acaso)
+        $counter = 1;
+        while (Staff::where('employee_number', $employeeNumber)->exists()) {
+            $employeeNumber = $prefix . '-' . str_pad($nextNumber + $counter, 3, '0', STR_PAD_LEFT);
+            $counter++;
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'employee_number' => $employeeNumber,
+            ],
+        ]);
+    }
 }

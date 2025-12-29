@@ -11,6 +11,7 @@ import Textarea from '../../components/common/Textarea';
 import Select from '../../components/common/Select';
 import Loading from '../../components/common/Loading';
 import LocationMapModal from '../../components/common/LocationMapModal';
+import ValidationErrorModal from '../../components/common/ValidationErrorModal';
 import toast from 'react-hot-toast';
 import useAuthStore from '../../store/authStore';
 
@@ -58,6 +59,8 @@ export default function CreateStaffPage() {
 
   const [isFormInitialized, setIsFormInitialized] = useState(false);
   const [showLocationModal, setShowLocationModal] = useState(false);
+  const [showValidationModal, setShowValidationModal] = useState(false);
+  const [validationErrors, setValidationErrors] = useState({});
 
   // Obtener personal si está en modo edición
   const { data: staffData, isLoading: loadingStaff } = useQuery({
@@ -80,6 +83,38 @@ export default function CreateStaffPage() {
     },
     enabled: isAuthenticated && !!user,
   });
+
+  // Función para generar número de empleado automáticamente
+  const generateEmployeeNumber = async () => {
+    if (isEditMode) return; // No generar en modo edición
+    
+    try {
+      const params = formData.area_id ? { area_id: formData.area_id } : {};
+      const response = await apiClient.get('/staff/generate-employee-number', { params });
+      if (response.data.success && response.data.data.employee_number) {
+        setFormData(prev => ({
+          ...prev,
+          employee_number: response.data.data.employee_number,
+        }));
+      }
+    } catch (error) {
+      console.error('Error generando número de empleado:', error);
+    }
+  };
+
+  // Generar número de empleado cuando cambia el área (solo en creación y si no hay número)
+  useEffect(() => {
+    if (!isEditMode && !formData.employee_number && formData.area_id) {
+      generateEmployeeNumber();
+    }
+  }, [formData.area_id]);
+
+  // Generar número de empleado al cargar el formulario (solo en creación, sin área)
+  useEffect(() => {
+    if (!isEditMode && !formData.employee_number && !formData.area_id) {
+      generateEmployeeNumber();
+    }
+  }, []);
 
   // Inicializar formulario con datos del personal
   useEffect(() => {
@@ -132,10 +167,36 @@ export default function CreateStaffPage() {
       navigate(`/staff/${data.data.id}`);
     },
     onError: (error) => {
-      const errorMessage = error.response?.data?.message || error.response?.data?.errors 
-        ? Object.values(error.response.data.errors).flat().join(', ')
-        : 'Error al crear personal';
-      toast.error(errorMessage);
+      const errors = error.response?.data?.errors || {};
+      const errorMessage = error.response?.data?.message;
+      
+      // Si hay errores de validación, mostrarlos en el modal
+      if (Object.keys(errors).length > 0) {
+        setValidationErrors(errors);
+        setShowValidationModal(true);
+        
+        // También mostrar un toast con un resumen
+        const errorFields = Object.keys(errors).map(field => {
+          const fieldNames = {
+            password: 'Contraseña',
+            password_confirmation: 'Confirmar Contraseña',
+            first_name: 'Nombre',
+            last_name: 'Apellido',
+            document_type: 'Tipo de Documento',
+            document_number: 'Número de Documento',
+            hire_date: 'Fecha de Ingreso',
+            employee_number: 'Número de Empleado',
+          };
+          return fieldNames[field] || field;
+        }).join(', ');
+        
+        toast.error(`Por favor corrige los siguientes campos: ${errorFields}`, {
+          duration: 5000,
+        });
+      } else {
+        // Si no hay errores de validación, mostrar el mensaje general
+        toast.error(errorMessage || 'Error al crear personal');
+      }
     },
   });
 
@@ -151,10 +212,37 @@ export default function CreateStaffPage() {
       navigate(`/staff/${id}`);
     },
     onError: (error) => {
-      const errorMessage = error.response?.data?.message || error.response?.data?.errors 
-        ? Object.values(error.response.data.errors).flat().join(', ')
-        : 'Error al actualizar personal';
-      toast.error(errorMessage);
+      const errors = error.response?.data?.errors || {};
+      const errorMessage = error.response?.data?.message;
+      
+      // Si hay errores de validación, mostrarlos en el modal
+      if (Object.keys(errors).length > 0) {
+        setValidationErrors(errors);
+        setShowValidationModal(true);
+        
+        // También mostrar un toast con un resumen
+        const errorFields = Object.keys(errors).map(field => {
+          const fieldNames = {
+            password: 'Contraseña',
+            password_confirmation: 'Confirmar Contraseña',
+            first_name: 'Nombre',
+            last_name: 'Apellido',
+            document_type: 'Tipo de Documento',
+            document_number: 'Número de Documento',
+            hire_date: 'Fecha de Ingreso',
+            employee_number: 'Número de Empleado',
+            code: 'Código',
+          };
+          return fieldNames[field] || field;
+        }).join(', ');
+        
+        toast.error(`Por favor corrige los siguientes campos: ${errorFields}`, {
+          duration: 5000,
+        });
+      } else {
+        // Si no hay errores de validación, mostrar el mensaje general
+        toast.error(errorMessage || 'Error al actualizar personal');
+      }
     },
   });
 
@@ -168,6 +256,11 @@ export default function CreateStaffPage() {
       latitude: formData.latitude ? parseFloat(formData.latitude) : null,
       longitude: formData.longitude ? parseFloat(formData.longitude) : null,
     };
+
+    // En modo edición, no enviar el número de empleado (es inmutable)
+    if (isEditMode) {
+      delete submitData.employee_number;
+    }
 
     // Limpiar campos vacíos
     Object.keys(submitData).forEach(key => {
@@ -242,12 +335,35 @@ export default function CreateStaffPage() {
                 </div>
               )}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <Input
-                  label="Número de Empleado"
-                  value={formData.employee_number}
-                  onChange={(e) => setFormData({ ...formData, employee_number: e.target.value })}
-                  placeholder="Número de empleado"
-                />
+                <div className="flex items-end gap-2">
+                  <div className="flex-1">
+                    <Input
+                      label="Número de Empleado"
+                      value={formData.employee_number}
+                      onChange={(e) => setFormData({ ...formData, employee_number: e.target.value })}
+                      placeholder="Se generará automáticamente"
+                      readOnly={true}
+                      disabled={true}
+                      className="bg-gray-50 cursor-not-allowed"
+                    />
+                    {isEditMode && (
+                      <p className="mt-1 text-xs text-gray-500">
+                        El número de empleado no se puede modificar una vez creado
+                      </p>
+                    )}
+                  </div>
+                  {!isEditMode && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={generateEmployeeNumber}
+                      className="mb-0"
+                    >
+                      Regenerar
+                    </Button>
+                  )}
+                </div>
                 <Input
                   label="Nombre *"
                   value={formData.first_name}
@@ -575,6 +691,17 @@ export default function CreateStaffPage() {
           initialLat={formData.latitude ? parseFloat(formData.latitude) : null}
           initialLng={formData.longitude ? parseFloat(formData.longitude) : null}
           address={formData.address}
+        />
+
+        {/* Modal de Errores de Validación */}
+        <ValidationErrorModal
+          open={showValidationModal}
+          onClose={() => {
+            setShowValidationModal(false);
+            setValidationErrors({});
+          }}
+          errors={validationErrors}
+          title="Errores de Validación"
         />
       </div>
     </AppLayout>

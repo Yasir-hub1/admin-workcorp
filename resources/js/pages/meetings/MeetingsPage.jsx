@@ -168,14 +168,27 @@ export default function MeetingsPage() {
     {
       key: 'actions',
       header: '',
-      render: (_, row) => (
-        <Link
-          to={`/meetings/${row.id}`}
-          className="text-indigo-600 hover:text-indigo-900 text-sm font-medium"
-        >
-          Ver detalles
-        </Link>
-      ),
+      render: (_, row) => {
+        const canEdit = isSuperAdmin() || row.organizer_id === user?.id;
+        return (
+          <div className="flex items-center gap-3">
+            <Link
+              to={`/meetings/${row.id}`}
+              className="text-indigo-600 hover:text-indigo-900 text-sm font-medium"
+            >
+              Ver detalles
+            </Link>
+            {canEdit && row.status !== 'completed' && (
+              <Link
+                to={`/meetings/${row.id}/edit`}
+                className="text-gray-600 hover:text-gray-900 text-sm font-medium"
+              >
+                Editar
+              </Link>
+            )}
+          </div>
+        );
+      },
     },
   ];
 
