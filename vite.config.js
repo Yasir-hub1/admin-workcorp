@@ -111,8 +111,8 @@ export default defineConfig({
         navigateFallback: 'index.html'
       },
       manifest: {
-        name: 'Mi PWA',
-        short_name: 'MiPWA',
+        name: 'Admin Workcorp',
+        short_name: 'Workcorp',
         description: 'PWA con Laravel + React',
         theme_color: '#ffffff',
         background_color: '#ffffff',

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 
-  <title>Mi PWA</title>
+  <title>Admin Workcorp</title>
   <meta name="description" content="PWA con Laravel + React">
 
   <!-- PWA Meta Tags -->
