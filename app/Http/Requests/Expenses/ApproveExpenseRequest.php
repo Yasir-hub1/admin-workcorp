@@ -8,7 +8,12 @@ class ApproveExpenseRequest extends FormRequest
 {
     public function authorize(): bool
     {
-        return true;
+        $user = $this->user();
+        
+        // Verificar si tiene alguno de los permisos de aprobación
+        return $user->hasPermission('expenses.approve-level-1') ||
+               $user->hasPermission('expenses.approve-level-2') ||
+               $user->hasPermission('expenses.approve-level-3');
     }
 
     public function rules(): array

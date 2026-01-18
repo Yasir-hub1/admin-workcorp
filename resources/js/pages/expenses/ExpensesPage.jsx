@@ -15,8 +15,10 @@ import Input from '../../components/common/Input';
 import Select from '../../components/common/Select';
 import { formatCurrency, formatDate } from '../../utils/formatters';
 import { getStatusColor, getStatusLabel, debounce } from '../../utils/helpers';
+import useAuthStore from '../../store/authStore';
 
 export default function ExpensesPage() {
+  const { hasPermission } = useAuthStore();
   const [page, setPage] = useState(1);
   const [searchInput, setSearchInput] = useState('');
   const [filters, setFilters] = useState({
@@ -26,6 +28,9 @@ export default function ExpensesPage() {
     start_date: '',
     end_date: '',
   });
+  
+  // Verificar permisos
+  const canCreate = hasPermission('expenses.create');
 
   // Debounce para el filtro de búsqueda
   const debouncedSearch = useMemo(
@@ -185,17 +190,19 @@ export default function ExpensesPage() {
               Gestiona los gastos y solicita aprobaciones
             </p>
           </div>
-          <motion.div
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
-          >
-            <Link to="/expenses/create">
-              <Button icon={PlusIcon} className="w-full sm:w-auto">
-                <span className="hidden sm:inline">Registrar Gasto</span>
-                <span className="sm:hidden">Nuevo</span>
-              </Button>
-            </Link>
-          </motion.div>
+          {canCreate && (
+            <motion.div
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+            >
+              <Link to="/expenses/create">
+                <Button icon={PlusIcon} className="w-full sm:w-auto">
+                  <span className="hidden sm:inline">Registrar Gasto</span>
+                  <span className="sm:hidden">Nuevo</span>
+                </Button>
+              </Link>
+            </motion.div>
+          )}
         </motion.div>
 
         {/* Statistics */}
@@ -304,9 +311,11 @@ export default function ExpensesPage() {
                 title="No hay gastos"
                 description="Comienza registrando tu primer gasto"
                 action={
-                  <Link to="/expenses/create">
-                    <Button icon={PlusIcon}>Registrar Gasto</Button>
-                  </Link>
+                  canCreate ? (
+                    <Link to="/expenses/create">
+                      <Button icon={PlusIcon}>Registrar Gasto</Button>
+                    </Link>
+                  ) : null
                 }
               />
             ) : (

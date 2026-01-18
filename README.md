@@ -283,10 +283,10 @@ git clone <repository-url> .
 composer install --optimize-autoloader --no-dev
 
 # Configurar permisos
-sudo chown -R www-data:www-data /var/www/admin.solucionesinteligentes.pro
-sudo chmod -R 755 /var/www/admin.solucionesinteligentes.pro
-sudo chmod -R 775 /var/www/admin.solucionesinteligentes.pro/storage
-sudo chmod -R 775 /var/www/admin.solucionesinteligentes.pro/bootstrap/cache
+sudo chown -R www-data:www-data /var/www/admin_corp
+sudo chmod -R 755 /var/www/admin_corp
+sudo chmod -R 775 /var/www/admin_corp/storage
+sudo chmod -R 775 /var/www/admin_corp/bootstrap/cache
 ```
 
 ### 4. Configurar variables de entorno de producción

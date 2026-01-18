@@ -31,8 +31,7 @@ export default function ExpenseDetailPage() {
   const navigate = useNavigate();
   const { id } = useParams();
   const queryClient = useQueryClient();
-  const { isAuthenticated, user } = useAuthStore();
-  const isSuperAdmin = useAuthStore((state) => state.isSuperAdmin);
+  const { isAuthenticated, user, hasPermission, isSuperAdmin } = useAuthStore();
 
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showApproveModal, setShowApproveModal] = useState(false);
@@ -66,13 +65,17 @@ export default function ExpenseDetailPage() {
 
   // Verificar permisos
   const canEdit = expense && expense.status === 'pending' && (
-    isSuperAdmin() || expense.created_by?.id === user?.id
+    hasPermission('expenses.edit') && (isSuperAdmin() || expense.created_by?.id === user?.id)
   );
   const canDelete = expense && expense.status === 'pending' && (
-    isSuperAdmin() || expense.created_by?.id === user?.id
+    hasPermission('expenses.delete') && (isSuperAdmin() || expense.created_by?.id === user?.id)
   );
-  const canApprove = expense && expense.status === 'pending' && isSuperAdmin();
-  const canMarkAsPaid = expense && expense.status === 'approved' && isSuperAdmin();
+  const canApprove = expense && expense.status === 'pending' && (
+    hasPermission('expenses.approve-level-1') ||
+    hasPermission('expenses.approve-level-2') ||
+    hasPermission('expenses.approve-level-3')
+  );
+  const canMarkAsPaid = expense && expense.status === 'approved' && hasPermission('expenses.mark-paid');
 
   // Mapear estados del backend al frontend
   const getMappedStatus = (status) => {

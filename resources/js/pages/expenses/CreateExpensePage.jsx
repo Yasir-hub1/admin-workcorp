@@ -13,13 +13,31 @@ import Loading from '../../components/common/Loading';
 import { formatCurrency } from '../../utils/formatters';
 import toast from 'react-hot-toast';
 import useAuthStore from '../../store/authStore';
+import { Navigate } from 'react-router-dom';
 
 export default function CreateExpensePage() {
   const navigate = useNavigate();
   const { id } = useParams();
   const queryClient = useQueryClient();
-  const { isAuthenticated, user } = useAuthStore();
+  const { isAuthenticated, user, hasPermission } = useAuthStore();
   const isEditMode = !!id;
+  
+  // Verificar permisos
+  const canCreate = hasPermission('expenses.create');
+  const canEdit = hasPermission('expenses.edit');
+  
+  // Redirigir si no tiene permisos
+  if (!isAuthenticated || !user) {
+    return <Navigate to="/login" replace />;
+  }
+  
+  if (isEditMode && !canEdit) {
+    return <Navigate to="/expenses" replace />;
+  }
+  
+  if (!isEditMode && !canCreate) {
+    return <Navigate to="/expenses" replace />;
+  }
 
   const [formData, setFormData] = useState({
     description: '',

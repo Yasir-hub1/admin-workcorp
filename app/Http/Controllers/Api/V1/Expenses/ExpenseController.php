@@ -15,11 +15,67 @@ use Illuminate\Http\Request;
 class ExpenseController extends Controller
 {
     /**
+     * Apply visibility scope based on user permissions.
+     */
+    private function applyVisibilityScope(Request $request, $query)
+    {
+        $user = $request->user();
+        if (!$user) return $query;
+
+        // Super admin: vista total
+        if ($user->hasRole('super_admin') || $user->hasPermission('expenses.view-all')) {
+            return $query;
+        }
+
+        // Construir condiciones basadas en permisos
+        $hasViewArea = $user->hasPermission('expenses.view-area');
+        $hasViewOwn = $user->hasPermission('expenses.view-own');
+
+        // Si no tiene ningún permiso de visualización, no ver nada
+        if (!$hasViewArea && !$hasViewOwn) {
+            return $query->whereRaw('1 = 0'); // Query que no retorna nada
+        }
+
+        // Aplicar condiciones con OR entre permisos
+        return $query->where(function ($q) use ($user, $hasViewArea, $hasViewOwn) {
+            // Vista por área: ver gastos de su área O sus propios gastos
+            if ($hasViewArea) {
+                $areaId = $user->area_id;
+                if ($areaId) {
+                    // Ver gastos de su área O sus propios gastos
+                    $q->where(function ($subQ) use ($areaId, $user) {
+                        $subQ->where('area_id', $areaId)
+                             ->orWhere('created_by', $user->id);
+                    });
+                } else {
+                    // Si no tiene área asignada, solo ver sus propios gastos
+                    $q->where('created_by', $user->id);
+                }
+            }
+
+            // Vista propia: ver solo sus propios gastos
+            // Si tiene ambos permisos, usar OR para combinar
+            if ($hasViewOwn) {
+                if ($hasViewArea) {
+                    // Ya está incluido en view-area, pero lo agregamos explícitamente con OR
+                    $q->orWhere('created_by', $user->id);
+                } else {
+                    // Solo tiene view-own
+                    $q->where('created_by', $user->id);
+                }
+            }
+        });
+    }
+
+    /**
      * Display a listing of expenses.
      */
     public function index(Request $request): JsonResponse
     {
         $query = Expense::with(['area', 'createdBy', 'paidByUser', 'approvals.approvedBy', 'attachments']);
+
+        // Aplicar scoping basado en permisos
+        $query = $this->applyVisibilityScope($request, $query);
 
         // Filters - solo aplicar si tienen valor
         if ($request->has('area_id') && !empty($request->area_id)) {
@@ -67,8 +123,8 @@ class ExpenseController extends Controller
         $perPage = $request->get('per_page', 15);
         $expenses = $query->latest('expense_date')->paginate($perPage);
 
-        // Obtener estadísticas
-        $statsQuery = Expense::query();
+        // Obtener estadísticas con el mismo scoping
+        $statsQuery = $this->applyVisibilityScope($request, Expense::query());
         $totalAmount = $statsQuery->sum('amount');
         $pendingAmount = $statsQuery->clone()->where('status', 'pending')->sum('amount');
         $approvedAmount = $statsQuery->clone()->where('status', 'approved')->sum('amount');
@@ -127,7 +183,7 @@ class ExpenseController extends Controller
     /**
      * Display the specified expense.
      */
-    public function show($id): JsonResponse
+    public function show(Request $request, $id): JsonResponse
     {
         $expense = Expense::with(['area', 'createdBy', 'paidByUser', 'approvals.approvedBy', 'attachments'])->find($id);
 
@@ -136,6 +192,47 @@ class ExpenseController extends Controller
                 'success' => false,
                 'message' => 'Gasto no encontrado',
             ], 404);
+        }
+
+        // Verificar permisos de visualización
+        $user = $request->user();
+
+        // Super admin o view-all: puede ver todo
+        if ($user->hasRole('super_admin') || $user->hasPermission('expenses.view-all')) {
+            // Puede ver el gasto
+        } elseif ($user->hasPermission('expenses.view-area')) {
+            // Puede ver gastos de su área O sus propios gastos
+            $areaId = $user->area_id;
+            $canView = false;
+
+            if ($areaId && $expense->area_id == $areaId) {
+                $canView = true; // Gasto de su área
+            }
+
+            if ($expense->created_by == $user->id) {
+                $canView = true; // Su propio gasto
+            }
+
+            if (!$canView) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'No tienes permiso para ver este gasto',
+                ], 403);
+            }
+        } elseif ($user->hasPermission('expenses.view-own')) {
+            // Solo puede ver sus propios gastos
+            if ($expense->created_by !== $user->id) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'No tienes permiso para ver este gasto',
+                ], 403);
+            }
+        } else {
+            // No tiene ningún permiso de visualización
+            return response()->json([
+                'success' => false,
+                'message' => 'No tienes permiso para ver este gasto',
+            ], 403);
         }
 
         return response()->json([
@@ -193,7 +290,7 @@ class ExpenseController extends Controller
     /**
      * Remove the specified expense.
      */
-    public function destroy($id): JsonResponse
+    public function destroy(Request $request, $id): JsonResponse
     {
         $expense = Expense::find($id);
 
@@ -202,6 +299,14 @@ class ExpenseController extends Controller
                 'success' => false,
                 'message' => 'Gasto no encontrado',
             ], 404);
+        }
+
+        // Verificar permiso de eliminación
+        if (!$request->user()->hasPermission('expenses.delete')) {
+            return response()->json([
+                'success' => false,
+                'message' => 'No tienes permiso para eliminar gastos',
+            ], 403);
         }
 
         // Only allow delete if status is pending
@@ -277,6 +382,14 @@ class ExpenseController extends Controller
             ], 404);
         }
 
+        // Verificar permiso
+        if (!$request->user()->hasPermission('expenses.mark-paid')) {
+            return response()->json([
+                'success' => false,
+                'message' => 'No tienes permiso para marcar gastos como pagados',
+            ], 403);
+        }
+
         if ($expense->status !== 'approved') {
             return response()->json([
                 'success' => false,
@@ -307,6 +420,9 @@ class ExpenseController extends Controller
     {
         $query = Expense::query();
 
+        // Aplicar scoping basado en permisos
+        $query = $this->applyVisibilityScope($request, $query);
+
         if ($request->has('area_id')) {
             $query->where('area_id', $request->area_id);
         }
@@ -335,10 +451,15 @@ class ExpenseController extends Controller
             ->groupBy('category')
             ->get();
 
-        $byArea = Expense::with('area')
-            ->selectRaw('area_id, COUNT(*) as count, SUM(amount) as total')
-            ->groupBy('area_id')
-            ->get();
+        // by_area solo para super admin o view-all
+        $byArea = [];
+        if ($request->user()?->hasRole('super_admin') || $request->user()?->hasPermission('expenses.view-all')) {
+            $byAreaQuery = $this->applyVisibilityScope($request, Expense::with('area'));
+            $byArea = $byAreaQuery
+                ->selectRaw('area_id, COUNT(*) as count, SUM(amount) as total')
+                ->groupBy('area_id')
+                ->get();
+        }
 
         return response()->json([
             'success' => true,

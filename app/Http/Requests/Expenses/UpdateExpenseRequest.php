@@ -8,6 +8,17 @@ class UpdateExpenseRequest extends FormRequest
 {
     public function authorize(): bool
     {
+        // Verificar permiso de edición
+        if (!$this->user()->hasPermission('expenses.edit')) {
+            return false;
+        }
+        
+        // Si el gasto existe, verificar que esté en estado pendiente
+        $expense = \App\Models\Expense::find($this->route('id'));
+        if ($expense && $expense->status !== 'pending') {
+            return false;
+        }
+        
         return true;
     }
 
