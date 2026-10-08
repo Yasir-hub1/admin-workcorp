@@ -7,6 +7,7 @@ use App\Http\Requests\Assets\StoreAssetRequest;
 use App\Http\Requests\Assets\UpdateAssetRequest;
 use App\Http\Resources\V1\Assets\AssetResource;
 use App\Models\Asset;
+use App\Support\Visibility;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -18,13 +19,17 @@ class AssetController extends Controller
     public function index(Request $request): JsonResponse
     {
         $query = Asset::with(['area', 'assignedUser', 'maintenances']);
+        $user = $request->user();
+        if ($user) {
+            Visibility::apply($query, $user, 'assets', 'assigned_to');
+        }
 
         // Filters - solo aplicar si tienen valor
-        if ($request->has('area_id') && !empty($request->area_id)) {
+        if ($request->has('area_id') && ! empty($request->area_id)) {
             $query->where('area_id', $request->area_id);
         }
 
-        if ($request->has('status') && !empty($request->status)) {
+        if ($request->has('status') && ! empty($request->status)) {
             // Mapear estados del frontend al backend si es necesario
             $statusMap = [
                 'disponible' => 'available',
@@ -37,20 +42,20 @@ class AssetController extends Controller
             $query->where('status', $status);
         }
 
-        if ($request->has('assigned_to') && !empty($request->assigned_to)) {
+        if ($request->has('assigned_to') && ! empty($request->assigned_to)) {
             $query->where('assigned_to', $request->assigned_to);
         }
 
-        if ($request->has('category') && !empty($request->category)) {
+        if ($request->has('category') && ! empty($request->category)) {
             $query->where('category', 'like', "%{$request->category}%");
         }
 
-        if ($request->has('search') && !empty($request->search)) {
+        if ($request->has('search') && ! empty($request->search)) {
             $search = $request->search;
             $query->where(function ($q) use ($search) {
                 $q->where('name', 'like', "%{$search}%")
-                  ->orWhere('code', 'like', "%{$search}%")
-                  ->orWhere('serial_number', 'like', "%{$search}%");
+                    ->orWhere('code', 'like', "%{$search}%")
+                    ->orWhere('serial_number', 'like', "%{$search}%");
             });
         }
 
@@ -58,8 +63,10 @@ class AssetController extends Controller
         $perPage = $request->get('per_page', 15);
         $assets = $query->latest()->paginate($perPage);
 
-        // Obtener estadísticas (sin filtros para estadísticas globales)
         $statsQuery = Asset::query();
+        if ($user) {
+            Visibility::apply($statsQuery, $user, 'assets', 'assigned_to');
+        }
         $totalValue = $statsQuery->sum('acquisition_cost');
         $byStatus = $statsQuery->clone()
             ->selectRaw('status, COUNT(*) as count')
@@ -75,7 +82,7 @@ class AssetController extends Controller
             'repair' => 'en_reparacion',
             'decommissioned' => 'dado_de_baja',
         ];
-        
+
         $formattedByStatus = [];
         foreach ($byStatus as $status => $count) {
             $key = $statusMap[$status] ?? $status;
@@ -104,9 +111,12 @@ class AssetController extends Controller
     public function store(StoreAssetRequest $request): JsonResponse
     {
         $data = $request->validated();
-        
+        if (empty($data['area_id']) && $request->user()) {
+            $data['area_id'] = Visibility::areaId($request->user());
+        }
+
         // Calculate current value if not provided
-        if (!isset($data['current_value'])) {
+        if (! isset($data['current_value'])) {
             $asset = new Asset($data);
             $data['current_value'] = $asset->getCurrentValueAttribute(null);
         }
@@ -127,11 +137,20 @@ class AssetController extends Controller
     {
         $asset = Asset::with(['area', 'assignedUser', 'maintenances.performedBy'])->find($id);
 
-        if (!$asset) {
+        if (! $asset) {
             return response()->json([
                 'success' => false,
                 'message' => 'Activo no encontrado',
             ], 404);
+        }
+
+        if ($user = request()->user()) {
+            if (Visibility::recordIsOutsideArea($user, $asset->area_id)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'No autorizado',
+                ], 403);
+            }
         }
 
         return response()->json([
@@ -147,7 +166,7 @@ class AssetController extends Controller
     {
         $asset = Asset::find($id);
 
-        if (!$asset) {
+        if (! $asset) {
             return response()->json([
                 'success' => false,
                 'message' => 'Activo no encontrado',
@@ -155,7 +174,7 @@ class AssetController extends Controller
         }
 
         $data = $request->validated();
-        
+
         // Recalculate current value if acquisition_cost or purchase_date changed
         if (isset($data['acquisition_cost']) || isset($data['purchase_date'])) {
             $tempAsset = $asset->replicate();
@@ -180,7 +199,7 @@ class AssetController extends Controller
     {
         $asset = Asset::find($id);
 
-        if (!$asset) {
+        if (! $asset) {
             return response()->json([
                 'success' => false,
                 'message' => 'Activo no encontrado',
@@ -201,9 +220,14 @@ class AssetController extends Controller
     public function statistics(Request $request): JsonResponse
     {
         $query = Asset::query();
+        $user = $request->user();
+        if ($user) {
+            Visibility::apply($query, $user, 'assets', 'assigned_to');
+        }
 
-        if ($request->has('area_id')) {
-            $query->where('area_id', $request->area_id);
+        $requestedAreaId = $user ? Visibility::requestedAreaId($user, $request->get('area_id')) : null;
+        if ($requestedAreaId) {
+            $query->where('area_id', $requestedAreaId);
         }
 
         $totalAssets = $query->count();
@@ -217,7 +241,7 @@ class AssetController extends Controller
             ->get()
             ->keyBy('status');
 
-        $byArea = Asset::with('area')
+        $byArea = (clone $query)->with('area')
             ->selectRaw('area_id, COUNT(*) as count, SUM(acquisition_cost) as total_value')
             ->groupBy('area_id')
             ->get();
@@ -243,7 +267,7 @@ class AssetController extends Controller
         $prefix = 'AST';
         $areaId = $request->input('area_id');
         $category = $request->input('category');
-        
+
         // Si hay área seleccionada, usar su código como prefijo
         if ($areaId) {
             $area = \App\Models\Area::find($areaId);
@@ -257,7 +281,7 @@ class AssetController extends Controller
             $categoryWords = explode(' ', $category);
             $categoryPrefix = '';
             foreach ($categoryWords as $word) {
-                if (!empty($word)) {
+                if (! empty($word)) {
                     $categoryPrefix .= strtoupper(substr($word, 0, 1));
                 }
             }
@@ -270,12 +294,12 @@ class AssetController extends Controller
         // Usar sintaxis compatible con PostgreSQL y MySQL
         $dbDriver = \DB::connection()->getDriverName();
         if ($dbDriver === 'pgsql') {
-            $lastAsset = Asset::where('code', 'like', $prefix . '-%')
-                ->orderByRaw('CAST(SUBSTRING(code, ' . (strlen($prefix) + 2) . ') AS INTEGER) DESC')
+            $lastAsset = Asset::where('code', 'like', $prefix.'-%')
+                ->orderByRaw('CAST(SUBSTRING(code, '.(strlen($prefix) + 2).') AS INTEGER) DESC')
                 ->first();
         } else {
-            $lastAsset = Asset::where('code', 'like', $prefix . '-%')
-                ->orderByRaw('CAST(SUBSTRING(code, ' . (strlen($prefix) + 2) . ') AS UNSIGNED) DESC')
+            $lastAsset = Asset::where('code', 'like', $prefix.'-%')
+                ->orderByRaw('CAST(SUBSTRING(code, '.(strlen($prefix) + 2).') AS UNSIGNED) DESC')
                 ->first();
         }
 
@@ -289,12 +313,12 @@ class AssetController extends Controller
         }
 
         // Generar el nuevo código con padding de ceros (001, 002, etc.)
-        $code = $prefix . '-' . str_pad($nextNumber, 3, '0', STR_PAD_LEFT);
+        $code = $prefix.'-'.str_pad($nextNumber, 3, '0', STR_PAD_LEFT);
 
         // Verificar que sea único
         $counter = 1;
         while (Asset::where('code', $code)->exists()) {
-            $code = $prefix . '-' . str_pad($nextNumber + $counter, 3, '0', STR_PAD_LEFT);
+            $code = $prefix.'-'.str_pad($nextNumber + $counter, 3, '0', STR_PAD_LEFT);
             $counter++;
         }
 
@@ -306,4 +330,3 @@ class AssetController extends Controller
         ]);
     }
 }
-

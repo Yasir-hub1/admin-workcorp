@@ -8,10 +8,10 @@ use App\Http\Requests\Services\UpdateServiceRequest;
 use App\Http\Resources\V1\Services\ServiceResource;
 use App\Models\ClientService;
 use App\Models\Service;
-use App\Models\ServiceRenewal;
-use App\Models\ServicePayment;
 use App\Models\ServiceIncident;
-use Carbon\Carbon;
+use App\Models\ServicePayment;
+use App\Models\ServiceRenewal;
+use App\Support\Visibility;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
@@ -24,13 +24,17 @@ class ServiceController extends Controller
     public function index(Request $request): JsonResponse
     {
         $query = Service::query()->with(['assignedUser', 'area']);
+        $user = $request->user();
+        if ($user) {
+            Visibility::applyWithClientArea($query, $user, 'services', 'assigned_to');
+        }
 
         // Filters - solo aplicar si tienen valor
-        if ($request->has('client_id') && !empty($request->client_id)) {
+        if ($request->has('client_id') && ! empty($request->client_id)) {
             $query->where('client_id', $request->client_id);
         }
 
-        if ($request->has('area_id') && !empty($request->area_id)) {
+        if ($request->has('area_id') && ! empty($request->area_id)) {
             $query->where('area_id', $request->area_id);
         }
 
@@ -38,25 +42,25 @@ class ServiceController extends Controller
             $query->where('assigned_to', $request->assigned_to);
         }
 
-        if ($request->has('status') && !empty($request->status)) {
+        if ($request->has('status') && ! empty($request->status)) {
             $query->where('status', $request->status);
         }
 
-        if ($request->has('category') && !empty($request->category)) {
+        if ($request->has('category') && ! empty($request->category)) {
             $query->where('category', $request->category);
         }
 
-        if ($request->has('billing_type') && !empty($request->billing_type)) {
+        if ($request->has('billing_type') && ! empty($request->billing_type)) {
             $query->where('billing_type', $request->billing_type);
         }
 
-        if ($request->has('search') && !empty($request->search)) {
+        if ($request->has('search') && ! empty($request->search)) {
             $search = $request->search;
             $query->where(function ($q) use ($search) {
                 $q->where('name', 'like', "%{$search}%")
-                  ->orWhere('code', 'like', "%{$search}%")
-                  ->orWhere('category', 'like', "%{$search}%")
-                  ->orWhere('description', 'like', "%{$search}%");
+                    ->orWhere('code', 'like', "%{$search}%")
+                    ->orWhere('category', 'like', "%{$search}%")
+                    ->orWhere('description', 'like', "%{$search}%");
             });
         }
 
@@ -64,8 +68,10 @@ class ServiceController extends Controller
         $perPage = $request->get('per_page', 15);
         $services = $query->latest('start_date')->latest('created_at')->paginate($perPage);
 
-        // Get statistics (without filters)
         $statsQuery = Service::query();
+        if ($user) {
+            Visibility::applyWithClientArea($statsQuery, $user, 'services', 'assigned_to');
+        }
         $totalServices = $statsQuery->count();
         $categories = $statsQuery->clone()
             ->selectRaw('category, COUNT(*) as count')
@@ -99,6 +105,9 @@ class ServiceController extends Controller
     public function store(StoreServiceRequest $request): JsonResponse
     {
         $data = $request->validated();
+        if (empty($data['area_id']) && $request->user()) {
+            $data['area_id'] = Visibility::areaId($request->user());
+        }
         $service = Service::create($data);
 
         return response()->json([
@@ -115,11 +124,23 @@ class ServiceController extends Controller
     {
         $service = Service::with(['assignedUser', 'area'])->find($id);
 
-        if (!$service) {
+        if (! $service) {
             return response()->json([
                 'success' => false,
                 'message' => 'Servicio no encontrado',
             ], 404);
+        }
+
+        if ($requestUser = request()->user()) {
+            if (Visibility::recordIsOutsideArea($requestUser, $service->area_id)) {
+                $clientArea = $service->client?->area_id;
+                if (Visibility::recordIsOutsideArea($requestUser, $clientArea) || $clientArea === null) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'No autorizado',
+                    ], 403);
+                }
+            }
         }
 
         return response()->json([
@@ -135,7 +156,7 @@ class ServiceController extends Controller
     {
         $service = Service::find($id);
 
-        if (!$service) {
+        if (! $service) {
             return response()->json([
                 'success' => false,
                 'message' => 'Servicio no encontrado',
@@ -159,7 +180,7 @@ class ServiceController extends Controller
     {
         $service = Service::find($id);
 
-        if (!$service) {
+        if (! $service) {
             return response()->json([
                 'success' => false,
                 'message' => 'Servicio no encontrado',
@@ -180,7 +201,7 @@ class ServiceController extends Controller
     public function payment(Request $request, $id): JsonResponse
     {
         $service = Service::find($id);
-        if (!$service) {
+        if (! $service) {
             return response()->json(['success' => false, 'message' => 'Servicio no encontrado'], 404);
         }
 
@@ -222,7 +243,7 @@ class ServiceController extends Controller
     public function renew(Request $request, $id): JsonResponse
     {
         $service = Service::find($id);
-        if (!$service) {
+        if (! $service) {
             return response()->json(['success' => false, 'message' => 'Servicio no encontrado'], 404);
         }
 
@@ -270,7 +291,7 @@ class ServiceController extends Controller
     public function incident(Request $request, $id): JsonResponse
     {
         $service = Service::find($id);
-        if (!$service) {
+        if (! $service) {
             return response()->json(['success' => false, 'message' => 'Servicio no encontrado'], 404);
         }
 
@@ -304,7 +325,6 @@ class ServiceController extends Controller
         ], 201);
     }
 
-
     /**
      * Get services statistics.
      */
@@ -312,32 +332,12 @@ class ServiceController extends Controller
     {
         $user = $request->user();
         $query = Service::query();
-
-        // Respetar visibilidad por permisos (no solo "middleware")
-        if ($user && !$user->hasRole('super_admin')) {
-            if ($user->hasPermission('services.view-all')) {
-                // sin filtro
-            } elseif ($user->hasPermission('services.view-area')) {
-                $areaId = $user->area_id;
-                if ($areaId) {
-                    $query->where(function ($q) use ($areaId) {
-                        $q->where('area_id', $areaId)
-                            ->orWhereHas('client', function ($cq) use ($areaId) {
-                                $cq->where('area_id', $areaId);
-                            });
-                    });
-                } else {
-                    // fallback seguro: si no tiene area asignada, solo ver propios
-                    $query->where('assigned_to', $user->id);
-                }
-            } else {
-                // view-own (o sin permiso explícito pero ruta protegida): propios
-                $query->where('assigned_to', $user->id);
-            }
+        if ($user) {
+            Visibility::applyWithClientArea($query, $user, 'services', 'assigned_to');
         }
 
         $totalServices = $query->count();
-        
+
         $categories = $query->clone()
             ->selectRaw('category, COUNT(*) as count')
             ->whereNotNull('category')
@@ -369,28 +369,8 @@ class ServiceController extends Controller
         $expiringServices = [];
         if ($canSeeExpiry) {
             $csQuery = ClientService::query()->with(['client', 'service', 'assignedUser']);
-
-            // Respetar visibilidad (services.view-all/area/own)
-            if ($user && !$user->hasRole('super_admin')) {
-                if ($user->hasPermission('services.view-all')) {
-                    // sin filtro
-                } elseif ($user->hasPermission('services.view-area')) {
-                    $areaId = $user->area_id;
-                    if ($areaId) {
-                        $csQuery->where(function ($q) use ($areaId) {
-                            $q->where('area_id', $areaId)
-                              ->orWhereHas('client', fn ($cq) => $cq->where('area_id', $areaId));
-                        });
-                    } else {
-                        $csQuery->where('assigned_to', $user->id);
-                    }
-                } else {
-                    // view-own
-                    $csQuery->where(function ($q) use ($user) {
-                        $q->where('assigned_to', $user->id)
-                          ->orWhereHas('client', fn ($cq) => $cq->where('assigned_to', $user->id));
-                    });
-                }
+            if ($user) {
+                Visibility::applyWithClientArea($csQuery, $user, 'services', 'assigned_to');
             }
 
             $expiringSoonCount = $csQuery->clone()
@@ -406,6 +386,7 @@ class ServiceController extends Controller
                 ->get()
                 ->map(function ($cs) {
                     $svcName = $cs->service?->name ?? 'Servicio';
+
                     return [
                         // id del kardex (client_service)
                         'id' => $cs->id,
@@ -454,6 +435,4 @@ class ServiceController extends Controller
             ],
         ]);
     }
-
 }
-

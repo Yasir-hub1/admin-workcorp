@@ -61,33 +61,8 @@ export default function MeetingsPage() {
   const { data: usersData } = useQuery({
     queryKey: ['users-for-meetings'],
     queryFn: async () => {
-      // Obtener usuarios a través de las áreas
-      const users = [];
-      try {
-        const areasResponse = await apiClient.get('/areas');
-        const areas = areasResponse.data.data || [];
-
-        // Obtener usuarios de cada área
-        for (const area of areas) {
-          try {
-            const areaResponse = await apiClient.get(`/areas/${area.id}`);
-            if (areaResponse.data.data?.staff) {
-              users.push(...areaResponse.data.data.staff);
-            }
-          } catch (error) {
-            // Ignorar errores individuales
-          }
-        }
-      } catch (error) {
-        console.error('Error obteniendo usuarios:', error);
-      }
-
-      // Eliminar duplicados
-      const uniqueUsers = users.filter((user, index, self) =>
-        index === self.findIndex(u => u.id === user.id)
-      );
-
-      return uniqueUsers;
+      const response = await apiClient.get('/lookups/users');
+      return response.data?.data || [];
     },
   });
 

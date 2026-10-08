@@ -27,7 +27,7 @@ export default function AttendanceReportPage() {
 
   const { data: areas } = useQuery({
     queryKey: ['areas'],
-    queryFn: async () => (await apiClient.get('/areas')).data.data || [],
+    queryFn: async () => (await apiClient.get('/lookups/areas')).data.data || [],
   });
 
   // IMPORTANTE: el "Personal" del sistema vive en /staff (no /users).
@@ -35,7 +35,7 @@ export default function AttendanceReportPage() {
   const { data: staffList } = useQuery({
     queryKey: ['staff', 'for-attendance-report'],
     queryFn: async () => {
-      const res = await apiClient.get('/staff', { params: { per_page: 300, is_active: 'true' } });
+      const res = await apiClient.get('/lookups/staff', { params: { is_active: true } });
       return res.data?.data || [];
     },
   });
@@ -63,6 +63,7 @@ export default function AttendanceReportPage() {
     { key: 'total_hours', header: 'Horas' },
     { key: 'overtime_hours', header: 'Horas extra' },
     { key: 'late_hours', header: 'Horas tarde' },
+    { key: 'early_leave_hours', header: 'Salida anticipada' },
   ];
 
   const exportExcel = async () => {
@@ -125,7 +126,7 @@ export default function AttendanceReportPage() {
         <div className="flex items-center justify-between gap-3">
           <div>
             <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Reporte de Asistencias</h1>
-            <p className="mt-1 text-sm text-gray-500">Por día/semana/mes con cálculo de horas trabajadas.</p>
+            <p className="mt-1 text-sm text-gray-500">Tardanzas y extras se calculan contra el horario registrado de cada persona.</p>
           </div>
           <div className="flex items-center gap-2">
             {filters.user_id && (

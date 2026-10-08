@@ -34,7 +34,7 @@ export default function NotesWidget() {
   const { data: staffList } = useQuery({
     queryKey: ['staff', 'for-notes-widget'],
     queryFn: async () => {
-      const res = await apiClient.get('/staff', { params: { per_page: 300, is_active: 'true' } });
+      const res = await apiClient.get('/lookups/staff', { params: { is_active: true } });
       return res.data?.data || [];
     },
     enabled: !!user,

@@ -87,7 +87,7 @@ export default function ClientDetailPage() {
   const { data: areasData } = useQuery({
     queryKey: ['areas'],
     queryFn: async () => {
-      const response = await apiClient.get('/areas');
+      const response = await apiClient.get('/lookups/areas');
       return response.data.data || [];
     },
     enabled: isAuthenticated && !!user,
@@ -96,30 +96,8 @@ export default function ClientDetailPage() {
   const { data: usersData } = useQuery({
     queryKey: ['users-for-services'],
     queryFn: async () => {
-      const users = [];
-      try {
-        const areasResponse = await apiClient.get('/areas');
-        const areas = areasResponse.data.data || [];
-
-        for (const area of areas) {
-          try {
-            const areaResponse = await apiClient.get(`/areas/${area.id}`);
-            if (areaResponse.data.data?.staff) {
-              users.push(...areaResponse.data.data.staff);
-            }
-          } catch (error) {
-            // Ignorar errores individuales
-          }
-        }
-      } catch (error) {
-        console.error('Error obteniendo usuarios:', error);
-      }
-
-      const uniqueUsers = users.filter((user, index, self) =>
-        index === self.findIndex(u => u.id === user.id)
-      );
-
-      return uniqueUsers;
+      const response = await apiClient.get('/lookups/users');
+      return response.data?.data || [];
     },
     enabled: isAuthenticated && !!user,
   });

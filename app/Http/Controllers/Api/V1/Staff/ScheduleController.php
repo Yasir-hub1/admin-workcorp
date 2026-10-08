@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\V1\Staff;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\V1\Schedules\ScheduleResource;
 use App\Models\Schedule;
+use App\Support\Visibility;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -19,31 +20,15 @@ class ScheduleController extends Controller
             $query->where('user_id', $request->user_id);
         }
 
-        if ($request->has('month') && !empty($request->month)) {
-            $query->where('month', $request->month . '-01');
+        if ($request->has('month') && ! empty($request->month)) {
+            $query->where('month', $request->month.'-01');
         }
 
         if ($request->has('is_approved') && $request->is_approved !== '') {
             $query->where('is_approved', $request->boolean('is_approved'));
         }
 
-        // Si es personal, solo ver sus horarios
-        // Si es jefe de área, ver horarios de su área
-        // Si es super admin, ver todos
-        $user = Auth::user();
-        if ($user->isSuperAdmin()) {
-            // Super admin ve todo
-        } elseif ($user->isJefeArea()) {
-            // Jefe de área ve horarios de su área
-            if ($user->area_id) {
-                $query->whereHas('user', function ($q) use ($user) {
-                    $q->where('area_id', $user->area_id);
-                });
-            }
-        } elseif ($user->isPersonal()) {
-            // Personal solo ve sus horarios
-            $query->where('user_id', $user->id);
-        }
+        Visibility::constrainByRelatedUserArea($query, Auth::user(), 'schedules');
 
         $perPage = $request->get('per_page', 15);
         $schedules = $query->latest('month')->paginate($perPage);
@@ -70,7 +55,7 @@ class ScheduleController extends Controller
 
         $validated['user_id'] = Auth::id();
         $validated['is_approved'] = false;
-        $validated['month'] = $validated['month'] . '-01';
+        $validated['month'] = $validated['month'].'-01';
 
         // Verificar si ya existe un horario para ese mes
         $existing = Schedule::where('user_id', Auth::id())
@@ -96,29 +81,25 @@ class ScheduleController extends Controller
         // Usar find para evitar conflictos con Route Model Binding
         $schedule = Schedule::with(['user.area', 'approvedBy'])->find($id);
 
-        if (!$schedule) {
+        if (! $schedule) {
             return response()->json([
                 'success' => false,
                 'message' => 'Horario no encontrado',
             ], 404);
         }
 
-        // Verificar permisos - Super Admin puede ver todo
         $user = Auth::user();
-        if ($user->isSuperAdmin()) {
-            // Super Admin puede ver todo - no hacer ninguna verificación adicional
-        } elseif ($user->isJefeArea()) {
-            // Jefe de área puede ver horarios de su área
-            $schedule->load('user.area');
-            if ($schedule->user && $schedule->user->area_id !== $user->area_id) {
+        if (! $user->isSuperAdmin()) {
+            $areaId = Visibility::areaId($user);
+            $schedule->loadMissing('user.staff');
+            $scheduleArea = $schedule->user?->area_id ?: $schedule->user?->staff?->area_id;
+            if ($areaId && (int) $scheduleArea !== (int) $areaId) {
                 return response()->json([
                     'success' => false,
                     'message' => 'No autorizado',
                 ], 403);
             }
-        } else {
-            // Personal solo puede ver sus propios horarios
-            if ($schedule->user_id !== $user->id) {
+            if (! $areaId && $schedule->user_id !== $user->id) {
                 return response()->json([
                     'success' => false,
                     'message' => 'No autorizado',
@@ -136,7 +117,7 @@ class ScheduleController extends Controller
     {
         $schedule = Schedule::find($id);
 
-        if (!$schedule) {
+        if (! $schedule) {
             return response()->json([
                 'success' => false,
                 'message' => 'Horario no encontrado',
@@ -144,7 +125,7 @@ class ScheduleController extends Controller
         }
 
         $user = Auth::user();
-        if (!$user->isSuperAdmin() && !$user->isJefeArea()) {
+        if (! $user->isSuperAdmin() && ! $user->isJefeArea()) {
             return response()->json([
                 'success' => false,
                 'message' => 'No autorizado',
@@ -152,8 +133,11 @@ class ScheduleController extends Controller
         }
 
         // Jefe de área solo puede aprobar horarios de su área
-        if ($user->isJefeArea() && !$user->isSuperAdmin()) {
-            if ($schedule->user->area_id !== $user->area_id) {
+        if (! $user->isSuperAdmin()) {
+            $areaId = Visibility::areaId($user);
+            $schedule->loadMissing('user.staff');
+            $scheduleArea = $schedule->user?->area_id ?: $schedule->user?->staff?->area_id;
+            if ($areaId && (int) $scheduleArea !== (int) $areaId) {
                 return response()->json([
                     'success' => false,
                     'message' => 'No puedes aprobar horarios de otra área',
@@ -183,7 +167,7 @@ class ScheduleController extends Controller
     {
         $schedule = Schedule::find($id);
 
-        if (!$schedule) {
+        if (! $schedule) {
             return response()->json([
                 'success' => false,
                 'message' => 'Horario no encontrado',
@@ -191,14 +175,14 @@ class ScheduleController extends Controller
         }
 
         $user = Auth::user();
-        if ($schedule->user_id !== $user->id && !$user->isSuperAdmin()) {
+        if ($schedule->user_id !== $user->id && ! $user->isSuperAdmin()) {
             return response()->json([
                 'success' => false,
                 'message' => 'No autorizado',
             ], 403);
         }
 
-        if ($schedule->is_approved && !$user->isSuperAdmin()) {
+        if ($schedule->is_approved && ! $user->isSuperAdmin()) {
             return response()->json([
                 'success' => false,
                 'message' => 'No puedes editar un horario ya aprobado',

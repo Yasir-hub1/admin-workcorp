@@ -8,6 +8,7 @@ use App\Http\Requests\Requests\UpdateRequestRequest;
 use App\Http\Resources\V1\Requests\RequestResource;
 use App\Models\Request;
 use App\Services\NotificationService;
+use App\Support\Visibility;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request as HttpRequest;
 use Illuminate\Support\Facades\Auth;
@@ -22,7 +23,7 @@ class RequestController extends Controller
         $query = Request::with([
             'user:id,name,email',
             'approvedBy:id,name,email',
-            'area:id,name,code'
+            'area:id,name,code',
         ]);
 
         // Filtros
@@ -42,18 +43,8 @@ class RequestController extends Controller
             $query->where('area_id', $request->area_id);
         }
 
-        // Filtros por permisos (Super Admin ve todo)
         $user = Auth::user();
-        
-        if ($user->isSuperAdmin()) {
-            // Super Admin ve todo, no se aplican filtros
-        } elseif ($user->hasPermission('requests.view-area') && $user->area_id) {
-            // Jefe de área ve solicitudes de su área
-            $query->where('area_id', $user->area_id);
-        } elseif ($user->hasPermission('requests.view-own')) {
-            // Personal solo ve sus propias solicitudes
-            $query->where('user_id', $user->id);
-        }
+        Visibility::apply($query, $user, 'requests', 'user_id');
 
         // Paginación
         $perPage = $request->get('per_page', 15);
@@ -81,14 +72,14 @@ class RequestController extends Controller
 
         $validated['user_id'] = $user->id;
         $validated['status'] = 'pending';
-        
+
         // Si no se proporciona area_id, usar el área del usuario
-        if (!isset($validated['area_id']) && $user->area_id) {
+        if (! isset($validated['area_id']) && $user->area_id) {
             $validated['area_id'] = $user->area_id;
         }
 
         // Calcular días si no se proporciona
-        if (!isset($validated['days_requested']) && isset($validated['start_date']) && isset($validated['end_date'])) {
+        if (! isset($validated['days_requested']) && isset($validated['start_date']) && isset($validated['end_date'])) {
             $start = \Carbon\Carbon::parse($validated['start_date']);
             $end = \Carbon\Carbon::parse($validated['end_date']);
             $validated['days_requested'] = $start->diffInDays($end) + 1;
@@ -103,7 +94,7 @@ class RequestController extends Controller
                 $areaId = $requestModel->area_id ?: $user->area_id;
                 if ($areaId) {
                     $staffName = $user->staff
-                        ? trim(($user->staff->first_name ?? '') . ' ' . ($user->staff->last_name ?? ''))
+                        ? trim(($user->staff->first_name ?? '').' '.($user->staff->last_name ?? ''))
                         : $user->name;
 
                     if (empty($staffName)) {
@@ -129,7 +120,7 @@ class RequestController extends Controller
                     );
 
                     // Link SPA a detalle (RequestDetailPage)
-                    $actionUrl = '/requests/' . $requestModel->id;
+                    $actionUrl = '/requests/'.$requestModel->id;
 
                     $data = [
                         'request_id' => $requestModel->id,
@@ -173,46 +164,33 @@ class RequestController extends Controller
     {
         // Buscar el modelo manualmente para evitar conflictos con route model binding
         $requestModel = Request::with(['user', 'approvedBy', 'area'])->find($id);
-        
-        if (!$requestModel) {
+
+        if (! $requestModel) {
             return response()->json([
                 'success' => false,
                 'message' => 'Solicitud no encontrada',
             ], 404);
         }
-        
+
         $user = Auth::user();
-        
-        // Verificar permisos de visualización (Super Admin siempre puede ver)
-        if (!$user->isSuperAdmin()) {
-            // Si tiene permiso de ver todas, puede ver
-            if ($user->hasPermission('requests.view-all')) {
-                // Puede ver todas
-            } elseif ($user->hasPermission('requests.view-area') && $user->area_id) {
-                // Solo puede ver solicitudes de su área
-                if ($requestModel->area_id !== $user->area_id) {
+
+        if (! Visibility::seesAll($user, 'requests')) {
+            $areaId = Visibility::areaId($user);
+            if (Visibility::seesArea($user, 'requests') || $user->hasPermission('requests.view-all')) {
+                if ($areaId && (int) $requestModel->area_id !== (int) $areaId) {
                     return response()->json([
                         'success' => false,
                         'message' => 'No tienes permisos para ver esta solicitud',
                     ], 403);
                 }
-            } elseif ($user->hasPermission('requests.view-own')) {
-                // Solo puede ver sus propias solicitudes
-                if ($requestModel->user_id !== $user->id) {
-                    return response()->json([
-                        'success' => false,
-                        'message' => 'No tienes permisos para ver esta solicitud',
-                    ], 403);
-                }
-            } else {
-                // No tiene ningún permiso de visualización
+            } elseif ($requestModel->user_id !== $user->id) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'No tienes permisos para ver solicitudes',
+                    'message' => 'No tienes permisos para ver esta solicitud',
                 ], 403);
             }
         }
-        
+
         return response()->json([
             'success' => true,
             'data' => new RequestResource($requestModel),
@@ -225,18 +203,18 @@ class RequestController extends Controller
     public function approve(HttpRequest $request, $id): JsonResponse
     {
         $requestModel = Request::find($id);
-        
-        if (!$requestModel) {
+
+        if (! $requestModel) {
             return response()->json([
                 'success' => false,
                 'message' => 'Solicitud no encontrada',
             ], 404);
         }
-        
+
         $user = Auth::user();
 
         // Verificar permisos (Super Admin siempre puede)
-        if (!$user->isSuperAdmin() && !$user->hasPermission('requests.approve')) {
+        if (! $user->isSuperAdmin() && ! $user->hasPermission('requests.approve')) {
             return response()->json([
                 'success' => false,
                 'message' => 'No tienes permisos para aprobar solicitudes',
@@ -272,7 +250,7 @@ class RequestController extends Controller
                     $requestModel->title,
                     $requestModel->type
                 );
-                $actionUrl = '/requests/' . $requestModel->id;
+                $actionUrl = '/requests/'.$requestModel->id;
                 $data = [
                     'request_id' => $requestModel->id,
                     'status' => $requestModel->status,
@@ -303,18 +281,18 @@ class RequestController extends Controller
     public function reject(HttpRequest $request, $id): JsonResponse
     {
         $requestModel = Request::find($id);
-        
-        if (!$requestModel) {
+
+        if (! $requestModel) {
             return response()->json([
                 'success' => false,
                 'message' => 'Solicitud no encontrada',
             ], 404);
         }
-        
+
         $user = Auth::user();
 
         // Verificar permisos (Super Admin siempre puede)
-        if (!$user->isSuperAdmin() && !$user->hasPermission('requests.reject')) {
+        if (! $user->isSuperAdmin() && ! $user->hasPermission('requests.reject')) {
             return response()->json([
                 'success' => false,
                 'message' => 'No tienes permisos para rechazar solicitudes',
@@ -350,7 +328,7 @@ class RequestController extends Controller
                     $requestModel->title,
                     $requestModel->rejection_reason
                 );
-                $actionUrl = '/requests/' . $requestModel->id;
+                $actionUrl = '/requests/'.$requestModel->id;
                 $data = [
                     'request_id' => $requestModel->id,
                     'status' => $requestModel->status,
@@ -381,17 +359,17 @@ class RequestController extends Controller
     public function update(UpdateRequestRequest $request, $id): JsonResponse
     {
         $requestModel = Request::find($id);
-        
-        if (!$requestModel) {
+
+        if (! $requestModel) {
             return response()->json([
                 'success' => false,
                 'message' => 'Solicitud no encontrada',
             ], 404);
         }
-        
+
         // Verificar que esté pendiente (Super Admin puede editar cualquier estado)
         $user = Auth::user();
-        if (!$user->isSuperAdmin() && $requestModel->status !== 'pending') {
+        if (! $user->isSuperAdmin() && $requestModel->status !== 'pending') {
             return response()->json([
                 'success' => false,
                 'message' => 'Solo puedes editar solicitudes pendientes',
@@ -399,12 +377,12 @@ class RequestController extends Controller
         }
 
         $validated = $request->validated();
-        
+
         // Recalcular días si se actualizan las fechas
         if (isset($validated['start_date']) || isset($validated['end_date'])) {
             $startDate = $validated['start_date'] ?? $requestModel->start_date;
             $endDate = $validated['end_date'] ?? $requestModel->end_date;
-            
+
             if ($startDate && $endDate) {
                 $start = \Carbon\Carbon::parse($startDate);
                 $end = \Carbon\Carbon::parse($endDate);
@@ -427,14 +405,14 @@ class RequestController extends Controller
     public function cancel($id): JsonResponse
     {
         $requestModel = Request::find($id);
-        
-        if (!$requestModel) {
+
+        if (! $requestModel) {
             return response()->json([
                 'success' => false,
                 'message' => 'Solicitud no encontrada',
             ], 404);
         }
-        
+
         if ($requestModel->user_id !== Auth::id()) {
             return response()->json([
                 'success' => false,
@@ -463,7 +441,7 @@ class RequestController extends Controller
                     $requestModel->title,
                     $requestModel->type
                 );
-                $actionUrl = '/requests/' . $requestModel->id;
+                $actionUrl = '/requests/'.$requestModel->id;
                 $data = [
                     'request_id' => $requestModel->id,
                     'status' => $requestModel->status,
@@ -494,10 +472,12 @@ class RequestController extends Controller
     public function statistics(HttpRequest $request): JsonResponse
     {
         $query = Request::query();
+        $user = Auth::user();
+        Visibility::apply($query, $user, 'requests', 'user_id');
 
-        // Filtros
-        if ($request->has('area_id')) {
-            $query->where('area_id', $request->area_id);
+        $areaId = Visibility::requestedAreaId($user, $request->get('area_id'));
+        if ($areaId) {
+            $query->where('area_id', $areaId);
         }
 
         if ($request->has('start_date') && $request->has('end_date')) {

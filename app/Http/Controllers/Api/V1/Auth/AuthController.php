@@ -9,7 +9,6 @@ use App\Http\Resources\V1\User\UserResource;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
 
@@ -22,18 +21,19 @@ class AuthController extends Controller
     {
         $credentials = $request->validated();
 
-        // Find user by email
-        $user = User::where('email', $credentials['email'])->first();
+        $user = User::query()
+            ->with('staff')
+            ->where('email', $credentials['email'])
+            ->first();
 
-        // Check if user exists and is active
-        if (!$user || !$user->is_active) {
+        if (! $user || ! $user->canAuthenticate()) {
             throw ValidationException::withMessages([
-                'email' => ['Las credenciales proporcionadas son incorrectas o el usuario está inactivo.'],
+                'email' => ['Las credenciales proporcionadas son incorrectas, el usuario está inactivo o el personal fue dado de baja.'],
             ]);
         }
 
         // Check password
-        if (!Hash::check($credentials['password'], $user->password)) {
+        if (! Hash::check($credentials['password'], $user->password)) {
             throw ValidationException::withMessages([
                 'email' => ['Las credenciales proporcionadas son incorrectas.'],
             ]);

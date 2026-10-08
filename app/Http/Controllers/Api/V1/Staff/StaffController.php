@@ -10,6 +10,8 @@ use App\Http\Resources\V1\Staff\StaffResource;
 use App\Http\Resources\V1\Staff\StaffSalaryResource;
 use App\Models\Staff;
 use App\Models\StaffSalary;
+use App\Services\Staff\StaffEmploymentService;
+use App\Support\Visibility;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -21,9 +23,10 @@ class StaffController extends Controller
     public function index(Request $request): JsonResponse
     {
         $query = Staff::with(['user', 'area', 'latestSalary']);
+        Visibility::constrainStaff($query, $request->user());
 
         // Filters
-        if ($request->has('area_id') && !empty($request->area_id)) {
+        if ($request->has('area_id') && ! empty($request->area_id)) {
             $query->where('area_id', $request->area_id);
         }
 
@@ -31,20 +34,20 @@ class StaffController extends Controller
             $query->where('is_active', filter_var($request->is_active, FILTER_VALIDATE_BOOLEAN));
         }
 
-        if ($request->has('position') && !empty($request->position)) {
+        if ($request->has('position') && ! empty($request->position)) {
             $query->where('position', 'like', "%{$request->position}%");
         }
 
-        if ($request->has('search') && !empty($request->search)) {
+        if ($request->has('search') && ! empty($request->search)) {
             $search = $request->search;
             $query->where(function ($q) use ($search) {
                 $q->where('employee_number', 'like', "%{$search}%")
-                  ->orWhere('document_number', 'like', "%{$search}%")
-                  ->orWhere('position', 'like', "%{$search}%")
-                  ->orWhereHas('user', function ($q) use ($search) {
-                      $q->where('name', 'like', "%{$search}%")
-                        ->orWhere('email', 'like', "%{$search}%");
-                  });
+                    ->orWhere('document_number', 'like', "%{$search}%")
+                    ->orWhere('position', 'like', "%{$search}%")
+                    ->orWhereHas('user', function ($q) use ($search) {
+                        $q->where('name', 'like', "%{$search}%")
+                            ->orWhere('email', 'like', "%{$search}%");
+                    });
             });
         }
 
@@ -70,7 +73,7 @@ class StaffController extends Controller
     public function store(StoreStaffRequest $request): JsonResponse
     {
         $data = $request->validated();
-        
+
         // Separar datos de sueldo inicial si se proporciona
         $salaryData = null;
         if (isset($data['initial_salary'])) {
@@ -111,7 +114,7 @@ class StaffController extends Controller
     {
         $staff = Staff::with(['user', 'area', 'salaries.approvedBy', 'managedAreas'])->find($id);
 
-        if (!$staff) {
+        if (! $staff) {
             return response()->json([
                 'success' => false,
                 'message' => 'Personal no encontrado',
@@ -127,11 +130,11 @@ class StaffController extends Controller
     /**
      * Update the specified staff member.
      */
-    public function update(UpdateStaffRequest $request, $id): JsonResponse
+    public function update(UpdateStaffRequest $request, $id, StaffEmploymentService $employment): JsonResponse
     {
         $staff = Staff::find($id);
 
-        if (!$staff) {
+        if (! $staff) {
             return response()->json([
                 'success' => false,
                 'message' => 'Personal no encontrado',
@@ -140,6 +143,7 @@ class StaffController extends Controller
 
         $data = $request->validated();
         $staff->update($data);
+        $employment->syncLinkedUser($staff->fresh('user'));
 
         return response()->json([
             'success' => true,
@@ -155,7 +159,7 @@ class StaffController extends Controller
     {
         $staff = Staff::find($id);
 
-        if (!$staff) {
+        if (! $staff) {
             return response()->json([
                 'success' => false,
                 'message' => 'Personal no encontrado',
@@ -182,7 +186,7 @@ class StaffController extends Controller
 
         $staff = Staff::find($id);
 
-        if (!$staff) {
+        if (! $staff) {
             return response()->json([
                 'success' => false,
                 'message' => 'Personal no encontrado',
@@ -213,7 +217,7 @@ class StaffController extends Controller
     {
         $staff = Staff::find($id);
 
-        if (!$staff) {
+        if (! $staff) {
             return response()->json([
                 'success' => false,
                 'message' => 'Personal no encontrado',
@@ -235,7 +239,7 @@ class StaffController extends Controller
     {
         $staff = Staff::find($id);
 
-        if (!$staff) {
+        if (! $staff) {
             return response()->json([
                 'success' => false,
                 'message' => 'Personal no encontrado',
@@ -273,7 +277,7 @@ class StaffController extends Controller
     {
         $prefix = 'EMP';
         $areaId = $request->input('area_id');
-        
+
         // Si hay área seleccionada, usar su código como prefijo
         if ($areaId) {
             $area = \App\Models\Area::find($areaId);
@@ -286,12 +290,12 @@ class StaffController extends Controller
         // Usar sintaxis compatible con PostgreSQL y MySQL
         $dbDriver = \DB::connection()->getDriverName();
         if ($dbDriver === 'pgsql') {
-            $lastEmployee = Staff::where('employee_number', 'like', $prefix . '-%')
-                ->orderByRaw('CAST(SUBSTRING(employee_number, ' . (strlen($prefix) + 2) . ') AS INTEGER) DESC')
+            $lastEmployee = Staff::where('employee_number', 'like', $prefix.'-%')
+                ->orderByRaw('CAST(SUBSTRING(employee_number, '.(strlen($prefix) + 2).') AS INTEGER) DESC')
                 ->first();
         } else {
-            $lastEmployee = Staff::where('employee_number', 'like', $prefix . '-%')
-                ->orderByRaw('CAST(SUBSTRING(employee_number, ' . (strlen($prefix) + 2) . ') AS UNSIGNED) DESC')
+            $lastEmployee = Staff::where('employee_number', 'like', $prefix.'-%')
+                ->orderByRaw('CAST(SUBSTRING(employee_number, '.(strlen($prefix) + 2).') AS UNSIGNED) DESC')
                 ->first();
         }
 
@@ -305,12 +309,12 @@ class StaffController extends Controller
         }
 
         // Generar el nuevo número con padding de ceros (001, 002, etc.)
-        $employeeNumber = $prefix . '-' . str_pad($nextNumber, 3, '0', STR_PAD_LEFT);
+        $employeeNumber = $prefix.'-'.str_pad($nextNumber, 3, '0', STR_PAD_LEFT);
 
         // Verificar que sea único (por si acaso)
         $counter = 1;
         while (Staff::where('employee_number', $employeeNumber)->exists()) {
-            $employeeNumber = $prefix . '-' . str_pad($nextNumber + $counter, 3, '0', STR_PAD_LEFT);
+            $employeeNumber = $prefix.'-'.str_pad($nextNumber + $counter, 3, '0', STR_PAD_LEFT);
             $counter++;
         }
 

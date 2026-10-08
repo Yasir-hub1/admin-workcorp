@@ -25,12 +25,12 @@ export default function RequestsReportPage() {
 
   const { data: areas } = useQuery({
     queryKey: ['areas'],
-    queryFn: async () => (await apiClient.get('/areas')).data.data || [],
+    queryFn: async () => (await apiClient.get('/lookups/areas')).data.data || [],
   });
 
   const { data: users } = useQuery({
     queryKey: ['users'],
-    queryFn: async () => (await apiClient.get('/users', { params: { per_page: 200 } })).data.data || [],
+    queryFn: async () => (await apiClient.get('/lookups/users')).data.data || [],
   });
 
   const params = useMemo(() => {

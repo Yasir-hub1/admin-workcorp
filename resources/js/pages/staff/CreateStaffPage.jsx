@@ -78,7 +78,7 @@ export default function CreateStaffPage() {
   const { data: areasData } = useQuery({
     queryKey: ['areas'],
     queryFn: async () => {
-      const response = await apiClient.get('/areas');
+      const response = await apiClient.get('/lookups/areas');
       return response.data.data || [];
     },
     enabled: isAuthenticated && !!user,

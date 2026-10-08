@@ -81,8 +81,8 @@ export default function CreateAreaPage() {
   const { data: staffData } = useQuery({
     queryKey: ['staff-for-area-managers'],
     queryFn: async () => {
-      const response = await apiClient.get('/staff', {
-        params: { is_active: true, per_page: 1000 },
+      const response = await apiClient.get('/lookups/staff', {
+        params: { is_active: true },
       });
       return response.data.data || [];
     },

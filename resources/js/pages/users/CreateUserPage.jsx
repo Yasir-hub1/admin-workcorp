@@ -49,7 +49,7 @@ export default function CreateUserPage() {
   const { data: areasData } = useQuery({
     queryKey: ['areas'],
     queryFn: async () => {
-      const response = await apiClient.get('/areas');
+      const response = await apiClient.get('/lookups/areas');
       return response.data.data || [];
     },
     enabled: isAuthenticated && !!user,
@@ -59,8 +59,8 @@ export default function CreateUserPage() {
   const { data: staffData } = useQuery({
     queryKey: ['staff-without-user'],
     queryFn: async () => {
-      const response = await apiClient.get('/staff', {
-        params: { is_active: true, per_page: 1000 },
+      const response = await apiClient.get('/lookups/staff', {
+        params: { is_active: true },
       });
       // Filtrar solo los que no tienen usuario
       return (response.data.data || []).filter(s => !s.user_id);
@@ -72,8 +72,8 @@ export default function CreateUserPage() {
   const { data: allStaffData } = useQuery({
     queryKey: ['all-staff-for-users'],
     queryFn: async () => {
-      const response = await apiClient.get('/staff', {
-        params: { per_page: 1000 },
+      const response = await apiClient.get('/lookups/staff', {
+        params: { is_active: false },
       });
       return response.data.data || [];
     },
@@ -84,7 +84,7 @@ export default function CreateUserPage() {
   const { data: rolesData } = useQuery({
     queryKey: ['roles-for-users'],
     queryFn: async () => {
-      const response = await apiClient.get('/roles', { params: { per_page: 1000 } });
+      const response = await apiClient.get('/lookups/roles');
       return response.data.data || [];
     },
     enabled: isAuthenticated && !!user,

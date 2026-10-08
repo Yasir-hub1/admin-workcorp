@@ -4,22 +4,24 @@ namespace App\Http\Controllers\Api\V1\Areas;
 
 use App\Http\Controllers\Controller;
 use App\Models\Area;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Storage;
+use App\Support\Visibility;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 
 class AreaController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
         $query = Area::with(['manager', 'parent', 'children', 'managers.user']);
+        Visibility::constrainAreas($query, $request->user());
 
         if ($request->has('is_active') && $request->is_active !== '') {
             $query->where('is_active', filter_var($request->is_active, FILTER_VALIDATE_BOOLEAN));
         }
 
-        if ($request->has('parent_id') && !empty($request->parent_id)) {
+        if ($request->has('parent_id') && ! empty($request->parent_id)) {
             if ($request->parent_id === 'root') {
                 $query->whereNull('parent_id');
             } else {
@@ -83,7 +85,7 @@ class AreaController extends Controller
         // Normalizar colores (asegurar que sean arrays válidos)
         if ($request->has('colors') && is_array($request->colors)) {
             $colors = array_filter($request->colors, function ($color) {
-                return !empty($color) && is_string($color) && preg_match('/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/', $color);
+                return ! empty($color) && is_string($color) && preg_match('/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/', $color);
             });
             // Validar que haya entre 2 y 3 colores válidos
             if (count($colors) > 0 && count($colors) <= 3) {
@@ -98,7 +100,7 @@ class AreaController extends Controller
         $area = Area::create($validated);
 
         // Asignar managers si se proporcionaron
-        if (!empty($managers) && is_array($managers)) {
+        if (! empty($managers) && is_array($managers)) {
             $area->managers()->sync(
                 collect($managers)->mapWithKeys(function ($staffId) {
                     return [$staffId => [
@@ -121,7 +123,7 @@ class AreaController extends Controller
     {
         $area = Area::with(['manager', 'parent', 'children', 'staff', 'managers.user', 'staffMembers.user'])->find($id);
 
-        if (!$area) {
+        if (! $area) {
             return response()->json([
                 'success' => false,
                 'message' => 'Área no encontrada',
@@ -138,7 +140,7 @@ class AreaController extends Controller
     {
         $area = Area::find($id);
 
-        if (!$area) {
+        if (! $area) {
             return response()->json([
                 'success' => false,
                 'message' => 'Área no encontrada',
@@ -155,7 +157,7 @@ class AreaController extends Controller
 
         $validated = $request->validate([
             'name' => 'sometimes|string|max:255',
-            'code' => 'sometimes|string|max:50|unique:areas,code,' . $area->id,
+            'code' => 'sometimes|string|max:50|unique:areas,code,'.$area->id,
             'description' => 'nullable|string',
             'parent_id' => 'nullable|exists:areas,id',
             'manager_id' => 'nullable|exists:users,id',
@@ -188,7 +190,7 @@ class AreaController extends Controller
         // Normalizar colores
         if ($request->has('colors') && is_array($request->colors)) {
             $colors = array_filter($request->colors, function ($color) {
-                return !empty($color) && is_string($color) && preg_match('/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/', $color);
+                return ! empty($color) && is_string($color) && preg_match('/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/', $color);
             });
             // Validar que haya entre 2 y 3 colores válidos (o permitir 1 si se está actualizando)
             if (count($colors) > 0 && count($colors) <= 3) {
@@ -205,7 +207,7 @@ class AreaController extends Controller
 
         // Actualizar managers si se proporcionaron
         if ($request->has('managers')) {
-            if (empty($managers) || !is_array($managers)) {
+            if (empty($managers) || ! is_array($managers)) {
                 $area->managers()->detach();
             } else {
                 $area->managers()->sync(
@@ -231,7 +233,7 @@ class AreaController extends Controller
     {
         $area = Area::find($id);
 
-        if (!$area) {
+        if (! $area) {
             return response()->json([
                 'success' => false,
                 'message' => 'Área no encontrada',
@@ -266,7 +268,7 @@ class AreaController extends Controller
 
         $area = Area::find($id);
 
-        if (!$area) {
+        if (! $area) {
             return response()->json([
                 'success' => false,
                 'message' => 'Área no encontrada',
@@ -302,7 +304,7 @@ class AreaController extends Controller
         ]);
 
         $area = Area::find($id);
-        if (!$area) {
+        if (! $area) {
             return response()->json([
                 'success' => false,
                 'message' => 'Área no encontrada',
@@ -378,6 +380,7 @@ class AreaController extends Controller
             DB::commit();
         } catch (\Throwable $e) {
             DB::rollBack();
+
             return response()->json([
                 'success' => false,
                 'message' => 'No se pudo asignar personal',
@@ -395,7 +398,7 @@ class AreaController extends Controller
     {
         $area = Area::find($id);
 
-        if (!$area) {
+        if (! $area) {
             return response()->json([
                 'success' => false,
                 'message' => 'Área no encontrada',
@@ -423,8 +426,8 @@ class AreaController extends Controller
     public function generateCode(Request $request): JsonResponse
     {
         $name = $request->input('name');
-        
-        if (!$name || empty(trim($name))) {
+
+        if (! $name || empty(trim($name))) {
             return response()->json([
                 'success' => false,
                 'message' => 'El nombre del área es requerido para generar el código',
@@ -434,7 +437,7 @@ class AreaController extends Controller
         // Generar código basado en las iniciales del nombre
         $words = explode(' ', trim($name));
         $code = '';
-        
+
         // Si tiene una sola palabra, tomar las primeras 3-4 letras
         if (count($words) === 1) {
             $word = strtoupper($words[0]);
@@ -444,7 +447,7 @@ class AreaController extends Controller
         } else {
             // Si tiene múltiples palabras, tomar la primera letra de cada palabra
             foreach ($words as $word) {
-                if (!empty($word)) {
+                if (! empty($word)) {
                     $firstChar = strtoupper(substr(trim($word), 0, 1));
                     // Solo letras
                     if (preg_match('/[A-Z]/', $firstChar)) {
@@ -469,14 +472,14 @@ class AreaController extends Controller
         while (Area::where('code', $code)->exists()) {
             // Si el código tiene más de 3 caracteres, truncar y agregar número
             if (strlen($originalCode) > 2) {
-                $code = substr($originalCode, 0, 2) . $counter;
+                $code = substr($originalCode, 0, 2).$counter;
             } else {
-                $code = $originalCode . $counter;
+                $code = $originalCode.$counter;
             }
             $counter++;
             // Limitar intentos
             if ($counter > 999) {
-                $code = $originalCode . time();
+                $code = $originalCode.time();
                 break;
             }
         }

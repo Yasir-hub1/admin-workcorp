@@ -6,7 +6,9 @@ use App\Http\Controllers\Controller;
 use App\Models\Attendance;
 use App\Models\AttendanceRecord;
 use App\Models\User;
+use App\Services\Attendance\AttendanceMetricsCalculator;
 use App\Services\NotificationService;
+use App\Support\Visibility;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -21,6 +23,7 @@ class AttendanceController extends Controller
     public function index(Request $request): JsonResponse
     {
         $query = Attendance::with(['user', 'records']);
+        Visibility::constrainByRelatedUserArea($query, $request->user(), 'attendance');
 
         // Filtros
         if ($request->has('user_id')) {
@@ -108,18 +111,17 @@ class AttendanceController extends Controller
                 'notes' => $request->input('notes'),
             ]);
 
-            // Recalcular tiempo total trabajado
-            $totalMinutes = $attendance->calculateTotalMinutes();
-            
-            // Calcular horas extras (asumiendo 8 horas = 480 minutos)
-            $standardMinutes = 480;
-            $overtimeMinutes = max(0, $totalMinutes - $standardMinutes);
+            $attendance->load(['user', 'records']);
+            $metrics = app(AttendanceMetricsCalculator::class)->forAttendance($attendance);
 
-            // Actualizar asistencia
             $attendance->update([
-                'total_minutes' => $totalMinutes,
-                'overtime_minutes' => $overtimeMinutes,
-                'status' => $this->determineStatus($attendance),
+                'total_minutes' => $metrics->workedMinutes,
+                'overtime_minutes' => $metrics->overtimeMinutes,
+                'late_minutes' => $metrics->lateMinutes,
+                'is_late' => $metrics->isLate,
+                'status' => $metrics->isLate && $this->determineStatus($attendance) === 'completed'
+                    ? 'late'
+                    : $this->determineStatus($attendance),
             ]);
 
             DB::commit();
@@ -141,7 +143,7 @@ class AttendanceController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => $this->getTypeLabel($type) . ' registrada correctamente',
+                'message' => $this->getTypeLabel($type).' registrada correctamente',
                 'data' => [
                     'attendance' => $attendance,
                     'record' => $record,
@@ -150,30 +152,35 @@ class AttendanceController extends Controller
             ], 201);
         } catch (\Exception $e) {
             DB::rollBack();
+
             return response()->json([
                 'success' => false,
-                'message' => 'Error al registrar la marcación: ' . $e->getMessage(),
+                'message' => 'Error al registrar la marcación: '.$e->getMessage(),
             ], 500);
         }
     }
 
     /**
      * Check in (marcar entrada) - Método legacy para compatibilidad.
+     *
      * @deprecated Usar mark() en su lugar
      */
     public function checkIn(Request $request): JsonResponse
     {
         $request->merge(['type' => 'check_in']);
+
         return $this->mark($request);
     }
 
     /**
      * Check out (marcar salida) - Método legacy para compatibilidad.
+     *
      * @deprecated Usar mark() en su lugar
      */
     public function checkOut(Request $request): JsonResponse
     {
         $request->merge(['type' => 'check_out']);
+
         return $this->mark($request);
     }
 
@@ -190,7 +197,7 @@ class AttendanceController extends Controller
             ->whereDate('date', $today)
             ->first();
 
-        if (!$attendance) {
+        if (! $attendance) {
             return response()->json([
                 'success' => true,
                 'data' => null,
@@ -246,6 +253,7 @@ class AttendanceController extends Controller
     public function show(Attendance $attendance): JsonResponse
     {
         $attendance->load(['user', 'records']);
+
         return response()->json([
             'success' => true,
             'data' => $attendance,
@@ -277,19 +285,19 @@ class AttendanceController extends Controller
     public function deleteRecord(AttendanceRecord $record): JsonResponse
     {
         $attendance = $record->attendance;
-        
+
         DB::beginTransaction();
         try {
             $record->delete();
 
-            // Recalcular tiempo total
-            $totalMinutes = $attendance->calculateTotalMinutes();
-            $standardMinutes = 480;
-            $overtimeMinutes = max(0, $totalMinutes - $standardMinutes);
+            $attendance->load(['user', 'records']);
+            $metrics = app(AttendanceMetricsCalculator::class)->forAttendance($attendance);
 
             $attendance->update([
-                'total_minutes' => $totalMinutes,
-                'overtime_minutes' => $overtimeMinutes,
+                'total_minutes' => $metrics->workedMinutes,
+                'overtime_minutes' => $metrics->overtimeMinutes,
+                'late_minutes' => $metrics->lateMinutes,
+                'is_late' => $metrics->isLate,
                 'status' => $this->determineStatus($attendance),
             ]);
 
@@ -302,9 +310,10 @@ class AttendanceController extends Controller
             ]);
         } catch (\Exception $e) {
             DB::rollBack();
+
             return response()->json([
                 'success' => false,
-                'message' => 'Error al eliminar el registro: ' . $e->getMessage(),
+                'message' => 'Error al eliminar el registro: '.$e->getMessage(),
             ], 500);
         }
     }
@@ -323,13 +332,13 @@ class AttendanceController extends Controller
     private function determineStatus(Attendance $attendance): string
     {
         $records = $attendance->records;
-        
+
         if ($records->isEmpty()) {
             return 'pending';
         }
 
         $lastRecord = $records->sortByDesc('timestamp')->first();
-        
+
         // Si la última marcación es entrada, está pendiente
         if ($lastRecord->type === 'check_in') {
             return 'pending';
@@ -338,7 +347,7 @@ class AttendanceController extends Controller
         // Si hay al menos una entrada y una salida, está completada
         $hasCheckIn = $records->where('type', 'check_in')->isNotEmpty();
         $hasCheckOut = $records->where('type', 'check_out')->isNotEmpty();
-        
+
         if ($hasCheckIn && $hasCheckOut) {
             return 'completed';
         }
@@ -353,7 +362,7 @@ class AttendanceController extends Controller
     {
         // Obtener nombre del personal
         $staffName = $user->staff
-            ? trim(($user->staff->first_name ?? '') . ' ' . ($user->staff->last_name ?? ''))
+            ? trim(($user->staff->first_name ?? '').' '.($user->staff->last_name ?? ''))
             : $user->name;
 
         if (empty($staffName)) {
@@ -374,7 +383,7 @@ class AttendanceController extends Controller
         );
 
         if ($record->notes) {
-            $message .= "\nNotas: " . $record->notes;
+            $message .= "\nNotas: ".$record->notes;
         }
 
         // Crear título

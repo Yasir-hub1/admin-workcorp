@@ -3,8 +3,8 @@
 namespace App\Models;
 
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
-use App\Traits\HasRoles;
 use App\Traits\HasPermissions;
+use App\Traits\HasRoles;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Foundation\Auth\User as Authenticatable;
@@ -14,7 +14,7 @@ use Laravel\Sanctum\HasApiTokens;
 class User extends Authenticatable
 {
     /** @use HasFactory<\Database\Factories\UserFactory> */
-    use HasFactory, Notifiable, HasApiTokens, SoftDeletes, HasRoles, HasPermissions;
+    use HasApiTokens, HasFactory, HasPermissions, HasRoles, Notifiable, SoftDeletes;
 
     /**
      * The attributes that are mass assignable.
@@ -108,7 +108,7 @@ class User extends Authenticatable
      */
     public function hasTwoFactorEnabled(): bool
     {
-        return !is_null($this->two_factor_secret) && !is_null($this->two_factor_confirmed_at);
+        return ! is_null($this->two_factor_secret) && ! is_null($this->two_factor_confirmed_at);
     }
 
     /**
@@ -221,5 +221,30 @@ class User extends Authenticatable
     public function staff()
     {
         return $this->hasOne(Staff::class);
+    }
+
+    /**
+     * User can sign in only if the account is active and staff is not terminated.
+     */
+    public function canAuthenticate(): bool
+    {
+        if (! $this->is_active) {
+            return false;
+        }
+
+        $staff = $this->relationLoaded('staff') ? $this->staff : $this->staff()->first();
+        if (! $staff) {
+            return true;
+        }
+
+        if (! $staff->is_active) {
+            return false;
+        }
+
+        if ($staff->termination_date && $staff->termination_date->lte(now()->startOfDay())) {
+            return false;
+        }
+
+        return true;
     }
 }

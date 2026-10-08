@@ -1,7 +1,7 @@
 import { Navigate, useLocation } from 'react-router-dom';
 import useAuthStore from '../store/authStore';
 
-export default function PrivateRoute({ children, requiredRole = null, requiredPermission = null }) {
+export default function PrivateRoute({ children, requiredRole = null, requiredPermission = null, anyPermissions = null }) {
   const { isAuthenticated, user, hasRole, hasPermission, isSuperAdmin } = useAuthStore();
   const location = useLocation();
 
@@ -23,6 +23,13 @@ export default function PrivateRoute({ children, requiredRole = null, requiredPe
   // Check permission requirement (only if not Super Admin)
   if (requiredPermission && !hasPermission(requiredPermission)) {
     return <Navigate to="/unauthorized" replace />;
+  }
+
+  if (Array.isArray(anyPermissions) && anyPermissions.length > 0) {
+    const allowed = anyPermissions.some((permission) => hasPermission(permission));
+    if (!allowed) {
+      return <Navigate to="/unauthorized" replace />;
+    }
   }
 
   return children;

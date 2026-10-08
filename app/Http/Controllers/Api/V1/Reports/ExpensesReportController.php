@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\V1\Reports;
 
 use App\Http\Controllers\Controller;
 use App\Models\Expense;
+use App\Support\Visibility;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -12,9 +13,11 @@ class ExpensesReportController extends Controller
     public function index(Request $request): JsonResponse
     {
         $query = Expense::with(['area', 'createdBy', 'paidByUser']);
+        Visibility::constrainReports($query, $request->user());
 
-        if ($request->filled('area_id')) {
-            $query->where('area_id', $request->area_id);
+        $areaId = Visibility::requestedAreaId($request->user(), $request->get('area_id'));
+        if ($areaId) {
+            $query->where('area_id', $areaId);
         }
 
         if ($request->filled('status')) {
@@ -22,7 +25,7 @@ class ExpensesReportController extends Controller
         }
 
         if ($request->filled('category')) {
-            $query->where('category', 'like', '%' . $request->category . '%');
+            $query->where('category', 'like', '%'.$request->category.'%');
         }
 
         if ($request->filled('created_by')) {
@@ -89,5 +92,3 @@ class ExpensesReportController extends Controller
         ]);
     }
 }
-
-

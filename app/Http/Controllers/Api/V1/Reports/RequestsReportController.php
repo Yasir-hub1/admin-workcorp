@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\V1\Reports;
 
 use App\Http\Controllers\Controller;
 use App\Models\Request as RequestModel;
+use App\Support\Visibility;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -12,6 +13,7 @@ class RequestsReportController extends Controller
     public function index(Request $request): JsonResponse
     {
         $query = RequestModel::with(['user', 'approvedBy', 'area']);
+        Visibility::constrainReports($query, $request->user());
 
         if ($request->filled('status')) {
             $query->where('status', $request->status);
@@ -22,8 +24,9 @@ class RequestsReportController extends Controller
         if ($request->filled('user_id')) {
             $query->where('user_id', $request->user_id);
         }
-        if ($request->filled('area_id')) {
-            $query->where('area_id', $request->area_id);
+        $areaId = Visibility::requestedAreaId($request->user(), $request->get('area_id'));
+        if ($areaId) {
+            $query->where('area_id', $areaId);
         }
 
         // Rango por fecha de creación (para reportes administrativos)
@@ -74,5 +77,3 @@ class RequestsReportController extends Controller
         ]);
     }
 }
-
-

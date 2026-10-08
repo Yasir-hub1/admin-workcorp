@@ -7,6 +7,7 @@ use App\Http\Requests\Clients\StoreClientRequest;
 use App\Http\Requests\Clients\UpdateClientRequest;
 use App\Http\Resources\V1\Clients\ClientResource;
 use App\Models\Client;
+use App\Support\Visibility;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -15,25 +16,11 @@ class ClientController extends Controller
     private function applyVisibilityScope(Request $request, $query)
     {
         $user = $request->user();
-        if (!$user) return $query;
-
-        // Super admin: vista total
-        if ($user->hasRole('super_admin') || $user->hasPermission('clients.view-all')) {
+        if (! $user) {
             return $query;
         }
 
-        // Vista por área
-        if ($user->hasPermission('clients.view-area')) {
-            $areaId = $user->area_id;
-            if ($areaId) {
-                return $query->where('area_id', $areaId);
-            }
-            // fallback seguro si no tiene área asignada
-            return $query->where('assigned_to', $user->id);
-        }
-
-        // Vista propia (default)
-        return $query->where('assigned_to', $user->id);
+        return Visibility::apply($query, $user, 'clients', 'assigned_to');
     }
 
     /**
@@ -45,23 +32,23 @@ class ClientController extends Controller
         $query = $this->applyVisibilityScope($request, $query);
 
         // Filters - solo aplicar si tienen valor
-        if ($request->has('area_id') && !empty($request->area_id)) {
+        if ($request->has('area_id') && ! empty($request->area_id)) {
             $query->where('area_id', $request->area_id);
         }
 
-        if ($request->has('status') && !empty($request->status)) {
+        if ($request->has('status') && ! empty($request->status)) {
             $query->where('status', $request->status);
         }
 
-        if ($request->has('category') && !empty($request->category)) {
+        if ($request->has('category') && ! empty($request->category)) {
             $query->where('category', $request->category);
         }
 
-        if ($request->has('assigned_to') && !empty($request->assigned_to)) {
+        if ($request->has('assigned_to') && ! empty($request->assigned_to)) {
             $query->where('assigned_to', $request->assigned_to);
         }
 
-        if ($request->has('type') && !empty($request->type)) {
+        if ($request->has('type') && ! empty($request->type)) {
             // Mapear tipo del frontend al backend
             $typeMap = [
                 'empresa' => 'company',
@@ -71,17 +58,17 @@ class ClientController extends Controller
             $query->where('client_type', $type);
         }
 
-        if ($request->has('client_type') && !empty($request->client_type)) {
+        if ($request->has('client_type') && ! empty($request->client_type)) {
             $query->where('client_type', $request->client_type);
         }
 
-        if ($request->has('search') && !empty($request->search)) {
+        if ($request->has('search') && ! empty($request->search)) {
             $search = $request->search;
             $query->where(function ($q) use ($search) {
                 $q->where('business_name', 'like', "%{$search}%")
-                  ->orWhere('legal_name', 'like', "%{$search}%")
-                  ->orWhere('document_number', 'like', "%{$search}%")
-                  ->orWhere('email', 'like', "%{$search}%");
+                    ->orWhere('legal_name', 'like', "%{$search}%")
+                    ->orWhere('document_number', 'like', "%{$search}%")
+                    ->orWhere('email', 'like', "%{$search}%");
             });
         }
 
@@ -106,7 +93,7 @@ class ClientController extends Controller
             'prospect' => 'prospecto',
             'lost' => 'perdido',
         ];
-        
+
         $formattedByStatus = [];
         foreach ($byStatus as $status => $count) {
             $key = $statusMap[$status] ?? $status;
@@ -136,6 +123,9 @@ class ClientController extends Controller
     public function store(StoreClientRequest $request): JsonResponse
     {
         $data = $request->validated();
+        if (empty($data['area_id']) && $request->user()) {
+            $data['area_id'] = Visibility::areaId($request->user());
+        }
         $client = Client::create($data);
 
         // Create contacts if provided
@@ -162,7 +152,7 @@ class ClientController extends Controller
             Client::with(['area', 'assignedUser', 'contacts', 'services'])
         )->where('id', $id)->first();
 
-        if (!$client) {
+        if (! $client) {
             return response()->json([
                 'success' => false,
                 'message' => 'Cliente no encontrado',
@@ -182,11 +172,20 @@ class ClientController extends Controller
     {
         $client = Client::find($id);
 
-        if (!$client) {
+        if (! $client) {
             return response()->json([
                 'success' => false,
                 'message' => 'Cliente no encontrado',
             ], 404);
+        }
+
+        if ($user = request()->user()) {
+            if (Visibility::recordIsOutsideArea($user, $client->area_id)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'No autorizado',
+                ], 403);
+            }
         }
 
         // Load all related data (Kardex: servicios adquiridos)
@@ -293,6 +292,7 @@ class ClientController extends Controller
         usort($kardex, function ($a, $b) {
             $dateA = $a['date'] ?? '';
             $dateB = $b['date'] ?? '';
+
             return strcmp($dateB, $dateA);
         });
 
@@ -302,17 +302,26 @@ class ClientController extends Controller
         $activeServices = $clientServices->filter(function ($s) use ($today) {
             // status null (data vieja) => tratar como active
             $status = $s->status ?? 'active';
-            if ($status !== 'active' && $status !== 'expiring') return false;
-            if ($s->end_date && $s->end_date->copy()->startOfDay()->lt($today)) return false;
+            if ($status !== 'active' && $status !== 'expiring') {
+                return false;
+            }
+            if ($s->end_date && $s->end_date->copy()->startOfDay()->lt($today)) {
+                return false;
+            }
+
             return true;
         })->count();
         $expiringServices = $clientServices->filter(function ($s) use ($today) {
             $end = $s->end_date ? $s->end_date->copy()->startOfDay() : null;
-            if (!$end) return false;
+            if (! $end) {
+                return false;
+            }
+
             return $end->gte($today) && $end->lte($today->copy()->addDays(15));
         })->count();
         $expiredServices = $clientServices->filter(function ($s) use ($today) {
             $end = $s->end_date ? $s->end_date->copy()->startOfDay() : null;
+
             return $end ? $end->lt($today) : false;
         })->count();
         $totalPayments = $clientServices->sum(function ($service) {
@@ -384,7 +393,7 @@ class ClientController extends Controller
     {
         $client = Client::find($id);
 
-        if (!$client) {
+        if (! $client) {
             return response()->json([
                 'success' => false,
                 'message' => 'Cliente no encontrado',
@@ -416,7 +425,7 @@ class ClientController extends Controller
     {
         $client = Client::find($id);
 
-        if (!$client) {
+        if (! $client) {
             return response()->json([
                 'success' => false,
                 'message' => 'Cliente no encontrado',
@@ -480,4 +489,3 @@ class ClientController extends Controller
         ]);
     }
 }
-

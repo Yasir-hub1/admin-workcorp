@@ -6,8 +6,9 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Users\StoreUserRequest;
 use App\Http\Requests\Users\UpdateUserRequest;
 use App\Http\Resources\V1\User\UserResource;
-use App\Models\User;
 use App\Models\Role;
+use App\Models\User;
+use App\Support\Visibility;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -20,9 +21,10 @@ class UserController extends Controller
     public function index(Request $request): JsonResponse
     {
         $query = User::with(['area', 'staff', 'roles']);
+        Visibility::constrainUsers($query, $request->user());
 
         // Filters
-        if ($request->has('area_id') && !empty($request->area_id)) {
+        if ($request->has('area_id') && ! empty($request->area_id)) {
             $query->where('area_id', $request->area_id);
         }
 
@@ -30,21 +32,21 @@ class UserController extends Controller
             $query->where('is_active', filter_var($request->is_active, FILTER_VALIDATE_BOOLEAN));
         }
 
-        if ($request->has('role') && !empty($request->role)) {
+        if ($request->has('role') && ! empty($request->role)) {
             $query->whereHas('roles', function ($q) use ($request) {
                 $q->where('name', $request->role);
             });
         }
 
-        if ($request->has('search') && !empty($request->search)) {
+        if ($request->has('search') && ! empty($request->search)) {
             $search = $request->search;
             $query->where(function ($q) use ($search) {
                 $q->where('name', 'like', "%{$search}%")
-                  ->orWhere('email', 'like', "%{$search}%")
-                  ->orWhereHas('staff', function ($q) use ($search) {
-                      $q->where('employee_number', 'like', "%{$search}%")
-                        ->orWhere('document_number', 'like', "%{$search}%");
-                  });
+                    ->orWhere('email', 'like', "%{$search}%")
+                    ->orWhereHas('staff', function ($q) use ($search) {
+                        $q->where('employee_number', 'like', "%{$search}%")
+                            ->orWhere('document_number', 'like', "%{$search}%");
+                    });
             });
         }
 
@@ -79,9 +81,14 @@ class UserController extends Controller
         // Create user
         $user = User::create($data);
 
-        // Assign staff if provided
         if ($request->has('staff_id') && $request->staff_id) {
-            \App\Models\Staff::where('id', $request->staff_id)->update(['user_id' => $user->id]);
+            $staff = \App\Models\Staff::find($request->staff_id);
+            if ($staff) {
+                $staff->update(['user_id' => $user->id]);
+                if (empty($data['area_id']) && $staff->area_id) {
+                    $user->update(['area_id' => $staff->area_id]);
+                }
+            }
         }
 
         // Assign roles if provided
@@ -107,7 +114,7 @@ class UserController extends Controller
     {
         $user = User::with(['area', 'staff', 'roles.permissions'])->find($id);
 
-        if (!$user) {
+        if (! $user) {
             return response()->json([
                 'success' => false,
                 'message' => 'Usuario no encontrado',
@@ -127,7 +134,7 @@ class UserController extends Controller
     {
         $user = User::find($id);
 
-        if (!$user) {
+        if (! $user) {
             return response()->json([
                 'success' => false,
                 'message' => 'Usuario no encontrado',
@@ -179,7 +186,7 @@ class UserController extends Controller
     {
         $user = User::find($id);
 
-        if (!$user) {
+        if (! $user) {
             return response()->json([
                 'success' => false,
                 'message' => 'Usuario no encontrado',

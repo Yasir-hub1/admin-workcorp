@@ -24,17 +24,17 @@ Route::prefix('v1')->group(function () {
         Route::post('/register', [AuthController::class, 'register'])->name('api.v1.auth.register');
 
         // Password Reset (To be implemented)
-        Route::post('/forgot-password', function() {
+        Route::post('/forgot-password', function () {
             return response()->json(['message' => 'Forgot password endpoint - To be implemented']);
         })->name('api.v1.auth.forgot-password');
 
-        Route::post('/reset-password', function() {
+        Route::post('/reset-password', function () {
             return response()->json(['message' => 'Reset password endpoint - To be implemented']);
         })->name('api.v1.auth.reset-password');
     });
 
     // Protected Routes
-    Route::middleware(['auth:sanctum'])->group(function () {
+    Route::middleware(['auth:sanctum', 'employment.active'])->group(function () {
 
         // Auth Protected Routes
         Route::prefix('auth')->group(function () {
@@ -44,8 +44,23 @@ Route::prefix('v1')->group(function () {
             Route::post('/refresh', [AuthController::class, 'refresh'])->name('api.v1.auth.refresh');
         });
 
+        Route::prefix('lookups')->group(function () {
+            Route::get('/areas', [\App\Http\Controllers\Api\V1\Lookups\LookupController::class, 'areas'])
+                ->name('api.v1.lookups.areas');
+            Route::get('/staff', [\App\Http\Controllers\Api\V1\Lookups\LookupController::class, 'staff'])
+                ->name('api.v1.lookups.staff');
+            Route::get('/users', [\App\Http\Controllers\Api\V1\Lookups\LookupController::class, 'users'])
+                ->name('api.v1.lookups.users');
+            Route::get('/clients', [\App\Http\Controllers\Api\V1\Lookups\LookupController::class, 'clients'])
+                ->name('api.v1.lookups.clients');
+            Route::get('/roles', [\App\Http\Controllers\Api\V1\Lookups\LookupController::class, 'roles'])
+                ->name('api.v1.lookups.roles');
+            Route::get('/ticket-categories', [\App\Http\Controllers\Api\V1\Lookups\LookupController::class, 'ticketCategories'])
+                ->name('api.v1.lookups.ticket-categories');
+        });
+
         // Test route to verify authentication
-        Route::get('/test', function(Request $request) {
+        Route::get('/test', function (Request $request) {
             return response()->json([
                 'success' => true,
                 'message' => 'API funcionando correctamente',
@@ -161,7 +176,7 @@ Route::prefix('v1')->group(function () {
         // Clients Routes
         Route::prefix('clients')->group(function () {
             Route::get('/', [\App\Http\Controllers\Api\V1\Clients\ClientController::class, 'index'])
-                ->middleware('permission:clients.view-all|clients.view-area|clients.view-own')
+                ->middleware('permission:clients.view-all|clients.view-area|clients.view-own|tickets.create|services.create')
                 ->name('api.v1.clients.index');
             Route::post('/', [\App\Http\Controllers\Api\V1\Clients\ClientController::class, 'store'])
                 ->middleware('permission:clients.create')
@@ -273,7 +288,7 @@ Route::prefix('v1')->group(function () {
             Route::post('/check-in', [\App\Http\Controllers\Api\V1\Attendance\AttendanceController::class, 'checkIn'])->name('api.v1.attendance.check-in'); // Legacy
             Route::post('/check-out', [\App\Http\Controllers\Api\V1\Attendance\AttendanceController::class, 'checkOut'])->name('api.v1.attendance.check-out'); // Legacy
             Route::get('/today', [\App\Http\Controllers\Api\V1\Attendance\AttendanceController::class, 'today'])
-                ->middleware('permission:attendance.view-all|attendance.view-area|attendance.view-own')
+                ->middleware('permission:attendance.view-all|attendance.view-area|attendance.view-own|attendance.clock')
                 ->name('api.v1.attendance.today');
             Route::get('/statistics', [\App\Http\Controllers\Api\V1\Attendance\AttendanceController::class, 'statistics'])
                 ->middleware('permission:attendance.view-all|attendance.view-area|attendance.view-own')
@@ -361,7 +376,7 @@ Route::prefix('v1')->group(function () {
         // Tickets Routes
         Route::prefix('tickets')->group(function () {
             Route::get('/categories', [\App\Http\Controllers\Api\V1\Tickets\TicketCategoryController::class, 'index'])
-                ->middleware('permission:tickets.view-all|tickets.view-area|tickets.view-own')
+                ->middleware('permission:tickets.view-all|tickets.view-area|tickets.view-own|tickets.create')
                 ->name('api.v1.tickets.categories.index');
             Route::post('/categories', [\App\Http\Controllers\Api\V1\Tickets\TicketCategoryController::class, 'store'])
                 ->middleware('permission:tickets.categories.manage')
@@ -414,7 +429,6 @@ Route::prefix('v1')->group(function () {
         // Areas Routes
         Route::prefix('areas')->group(function () {
             Route::get('/', [\App\Http\Controllers\Api\V1\Areas\AreaController::class, 'index'])
-                ->middleware('permission:areas.view')
                 ->name('api.v1.areas.index');
             Route::post('/', [\App\Http\Controllers\Api\V1\Areas\AreaController::class, 'store'])
                 ->middleware('permission:areas.create')
@@ -445,7 +459,7 @@ Route::prefix('v1')->group(function () {
         // Staff Routes
         Route::prefix('staff')->group(function () {
             Route::get('/', [\App\Http\Controllers\Api\V1\Staff\StaffController::class, 'index'])
-                ->middleware('permission:staff.view-all|staff.view-own')
+                ->middleware('permission:staff.view-all|staff.view-own|users.create|users.edit|tickets.create|tickets.assign|meetings.create|reports.view-all|reports.view-area|areas.assign-members|areas.assign-managers')
                 ->name('api.v1.staff.index');
             Route::post('/', [\App\Http\Controllers\Api\V1\Staff\StaffController::class, 'store'])
                 ->middleware('permission:staff.create')
@@ -470,7 +484,7 @@ Route::prefix('v1')->group(function () {
         // Users Routes
         Route::prefix('users')->group(function () {
             Route::get('/', [\App\Http\Controllers\Api\V1\Users\UserController::class, 'index'])
-                ->middleware('permission:users.view')
+                ->middleware('permission:users.view|tickets.create|tickets.assign|meetings.create|reports.view-all|reports.view-area')
                 ->name('api.v1.users.index');
             Route::post('/', [\App\Http\Controllers\Api\V1\Users\UserController::class, 'store'])
                 ->middleware('permission:users.create')
@@ -489,7 +503,7 @@ Route::prefix('v1')->group(function () {
         // Roles Routes
         Route::prefix('roles')->group(function () {
             Route::get('/', [\App\Http\Controllers\Api\V1\Roles\RoleController::class, 'index'])
-                ->middleware('permission:roles.view')
+                ->middleware('permission:roles.view|users.create|users.edit')
                 ->name('api.v1.roles.index');
             Route::post('/', [\App\Http\Controllers\Api\V1\Roles\RoleController::class, 'store'])
                 ->middleware('permission:roles.create')

@@ -7,6 +7,7 @@ use App\Models\Expense;
 use App\Models\Meeting;
 use App\Models\Request as RequestModel;
 use App\Models\Ticket;
+use App\Support\Visibility;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -19,21 +20,14 @@ class StatisticsController extends Controller
     {
         $user = Auth::user();
 
-        if ($user->hasRole('personal')) {
-            return response()->json([
-                'success' => false,
-                'message' => 'No autorizado',
-            ], 403);
-        }
-
         $startDate = $request->get('start_date', now()->subDays(30)->toDateString());
         $endDate = $request->get('end_date', now()->toDateString());
 
         $areaId = null;
-        if ($user->hasRole('jefe_area') && $user->area_id) {
-            $areaId = (int) $user->area_id;
-        } elseif ($request->filled('area_id')) {
-            $areaId = (int) $request->area_id;
+        if ($user->isSuperAdmin()) {
+            $areaId = $request->filled('area_id') ? (int) $request->area_id : null;
+        } else {
+            $areaId = Visibility::areaId($user);
         }
 
         // Tickets base query
@@ -86,9 +80,9 @@ class StatisticsController extends Controller
             ->values();
 
         $ticketsTrend = (clone $ticketsBase)
-            ->select(DB::raw("DATE(tickets.created_at) as date"), DB::raw('COUNT(*) as count'))
-            ->groupBy(DB::raw("DATE(tickets.created_at)"))
-            ->orderBy(DB::raw("DATE(tickets.created_at)"))
+            ->select(DB::raw('DATE(tickets.created_at) as date'), DB::raw('COUNT(*) as count'))
+            ->groupBy(DB::raw('DATE(tickets.created_at)'))
+            ->orderBy(DB::raw('DATE(tickets.created_at)'))
             ->get()
             ->map(fn ($r) => ['date' => (string) $r->date, 'value' => (int) $r->count])
             ->values();
@@ -116,9 +110,9 @@ class StatisticsController extends Controller
             ->count();
 
         $meetingsTrend = (clone $meetingsBase)
-            ->select(DB::raw("DATE(meetings.start_time) as date"), DB::raw('COUNT(*) as count'))
-            ->groupBy(DB::raw("DATE(meetings.start_time)"))
-            ->orderBy(DB::raw("DATE(meetings.start_time)"))
+            ->select(DB::raw('DATE(meetings.start_time) as date'), DB::raw('COUNT(*) as count'))
+            ->groupBy(DB::raw('DATE(meetings.start_time)'))
+            ->orderBy(DB::raw('DATE(meetings.start_time)'))
             ->get()
             ->map(fn ($r) => ['date' => (string) $r->date, 'value' => (int) $r->count])
             ->values();
@@ -162,9 +156,9 @@ class StatisticsController extends Controller
             ->values();
 
         $expensesTrend = (clone $expensesBase)
-            ->select(DB::raw("DATE(expenses.expense_date) as date"), DB::raw('SUM(expenses.amount) as total'))
-            ->groupBy(DB::raw("DATE(expenses.expense_date)"))
-            ->orderBy(DB::raw("DATE(expenses.expense_date)"))
+            ->select(DB::raw('DATE(expenses.expense_date) as date'), DB::raw('SUM(expenses.amount) as total'))
+            ->groupBy(DB::raw('DATE(expenses.expense_date)'))
+            ->orderBy(DB::raw('DATE(expenses.expense_date)'))
             ->get()
             ->map(fn ($r) => ['date' => (string) $r->date, 'value' => (float) ($r->total ?? 0)])
             ->values();
@@ -220,5 +214,3 @@ class StatisticsController extends Controller
         ]);
     }
 }
-
-

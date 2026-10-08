@@ -426,7 +426,7 @@ export default function AppRouter() {
       <Route
         path="/areas"
         element={
-          <PrivateRoute>
+          <PrivateRoute anyPermissions={['areas.view']}>
             <AreasPage />
           </PrivateRoute>
         }
@@ -458,7 +458,7 @@ export default function AppRouter() {
       <Route
         path="/staff"
         element={
-          <PrivateRoute>
+          <PrivateRoute anyPermissions={['staff.view-all', 'staff.view-own']}>
             <StaffPage />
           </PrivateRoute>
         }
@@ -490,7 +490,7 @@ export default function AppRouter() {
       <Route
         path="/users"
         element={
-          <PrivateRoute>
+          <PrivateRoute anyPermissions={['users.view']}>
             <UsersPage />
           </PrivateRoute>
         }

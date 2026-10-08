@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\V1\Reports;
 
 use App\Http\Controllers\Controller;
 use App\Models\Meeting;
+use App\Support\Visibility;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -12,6 +13,7 @@ class MeetingsReportController extends Controller
     public function index(Request $request): JsonResponse
     {
         $query = Meeting::with(['organizer', 'area']);
+        Visibility::constrainReports($query, $request->user());
 
         if ($request->filled('status')) {
             $query->where('status', $request->status);
@@ -22,8 +24,9 @@ class MeetingsReportController extends Controller
         if ($request->filled('organizer_id')) {
             $query->where('organizer_id', $request->organizer_id);
         }
-        if ($request->filled('area_id')) {
-            $query->where('area_id', $request->area_id);
+        $areaId = Visibility::requestedAreaId($request->user(), $request->get('area_id'));
+        if ($areaId) {
+            $query->where('area_id', $areaId);
         }
 
         if ($request->filled('start_date')) {
@@ -73,5 +76,3 @@ class MeetingsReportController extends Controller
         ]);
     }
 }
-
-

@@ -4,9 +4,10 @@ namespace App\Http\Controllers\Api\V1\Tickets;
 
 use App\Http\Controllers\Controller;
 use App\Http\Resources\V1\Tickets\TicketResource;
-use App\Models\TicketCategory;
 use App\Models\Ticket;
+use App\Models\TicketCategory;
 use App\Services\NotificationService;
+use App\Support\Visibility;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -19,36 +20,24 @@ class TicketController extends Controller
         $query = Ticket::with(['createdBy', 'assignedTo', 'area', 'client']);
 
         // Filtros - solo aplicar si tienen valor
-        if ($request->has('status') && !empty($request->status)) {
+        if ($request->has('status') && ! empty($request->status)) {
             $query->where('status', $request->status);
         }
 
-        if ($request->has('category') && !empty($request->category)) {
+        if ($request->has('category') && ! empty($request->category)) {
             $query->where('category', $request->category);
         }
 
-        if ($request->has('priority') && !empty($request->priority)) {
+        if ($request->has('priority') && ! empty($request->priority)) {
             $query->where('priority', $request->priority);
         }
 
-        if ($request->has('assigned_to') && !empty($request->assigned_to)) {
+        if ($request->has('assigned_to') && ! empty($request->assigned_to)) {
             $query->where('assigned_to', $request->assigned_to);
         }
 
-        // Filtros por permisos - Super Admin ve todo
         $user = Auth::user();
-        if ($user->isSuperAdmin()) {
-            // Super Admin ve todos los tickets - no aplicar filtros de usuario
-        } elseif ($user->hasRole('personal')) {
-            // Personal ve tickets creados por él o asignados a él (soporte)
-            $query->where(function ($q) use ($user) {
-                $q->where('created_by', $user->id)
-                  ->orWhere('assigned_to', $user->id);
-            });
-        } elseif ($user->hasRole('jefe_area') && $user->area_id) {
-            // Jefe de área ve tickets de su área
-            $query->where('area_id', $user->area_id);
-        }
+        Visibility::apply($query, $user, 'tickets', 'created_by');
 
         $perPage = $request->get('per_page', 15);
         $tickets = $query->latest()->paginate($perPage);
@@ -80,6 +69,9 @@ class TicketController extends Controller
 
         $validated['created_by'] = Auth::id();
         $validated['status'] = 'assigned';
+        if (empty($validated['area_id'])) {
+            $validated['area_id'] = Visibility::areaId(Auth::user());
+        }
 
         // Mantener un catálogo de categorías para buscador / evitar duplicados
         try {
@@ -105,7 +97,7 @@ class TicketController extends Controller
         }
 
         // Calcular SLA
-        $slaHours = match($validated['priority']) {
+        $slaHours = match ($validated['priority']) {
             'urgent' => 2,
             'high' => 8,
             'medium' => 24,
@@ -125,10 +117,10 @@ class TicketController extends Controller
             $clientName = $ticket->client?->business_name ?? $ticket->client?->legal_name ?? 'Cliente';
             $title = "Ticket asignado: {$ticket->ticket_number}";
             $message = "Nuevo ticket para {$clientName}\n"
-                . "Título: {$ticket->title}\n"
-                . "Categoría: {$ticket->category}\n"
-                . "Prioridad: {$ticket->priority}\n"
-                . "Creado por: " . ($creator?->name ?? 'Sistema');
+                ."Título: {$ticket->title}\n"
+                ."Categoría: {$ticket->category}\n"
+                ."Prioridad: {$ticket->priority}\n"
+                .'Creado por: '.($creator?->name ?? 'Sistema');
             $actionUrl = "/tickets/{$ticket->id}";
             $data = [
                 'ticket_id' => $ticket->id,
@@ -143,14 +135,14 @@ class TicketController extends Controller
             NotificationService::sendPushNotifications([$assignedId], $title, $message, $actionUrl, $data);
 
             // Admin debe enterarse de todo ticket creado/asignado
-            $assignedName = $ticket->assignedTo?->name ?? ('Usuario #' . $assignedId);
+            $assignedName = $ticket->assignedTo?->name ?? ('Usuario #'.$assignedId);
             $adminTitle = "Nuevo ticket creado: {$ticket->ticket_number}";
             $adminMessage = "Se creó un ticket y fue asignado.\n"
-                . "Cliente: {$clientName}\n"
-                . "Título: {$ticket->title}\n"
-                . "Asignado a: {$assignedName}\n"
-                . "Prioridad: {$ticket->priority}\n"
-                . "Creado por: " . ($creator?->name ?? 'Sistema');
+                ."Cliente: {$clientName}\n"
+                ."Título: {$ticket->title}\n"
+                ."Asignado a: {$assignedName}\n"
+                ."Prioridad: {$ticket->priority}\n"
+                .'Creado por: '.($creator?->name ?? 'Sistema');
             NotificationService::notifySuperAdmins('ticket', $adminTitle, $adminMessage, $actionUrl, 'normal', array_merge($data, [
                 'assigned_to' => $assignedId,
             ]));
@@ -173,28 +165,23 @@ class TicketController extends Controller
     {
         $ticket = Ticket::with(['createdBy', 'assignedTo', 'resolvedBy', 'area', 'client'])->find($id);
 
-        if (!$ticket) {
+        if (! $ticket) {
             return response()->json([
                 'success' => false,
                 'message' => 'Ticket no encontrado',
             ], 404);
         }
 
-        // Verificar permisos - Super Admin puede ver todo
         $user = Auth::user();
-        if ($user->isSuperAdmin()) {
-            // Super Admin puede ver todo - no hacer ninguna verificación adicional
-        } elseif ($user->hasRole('personal')) {
-            // Personal puede ver tickets creados por él o asignados a él
-            if ($ticket->created_by !== $user->id && (int) $ticket->assigned_to !== (int) $user->id) {
+        if (! $user->isSuperAdmin()) {
+            $areaId = Visibility::areaId($user);
+            if ($areaId && (int) $ticket->area_id !== (int) $areaId) {
                 return response()->json([
                     'success' => false,
                     'message' => 'No autorizado',
                 ], 403);
             }
-        } elseif ($user->hasRole('jefe_area') && $user->area_id) {
-            // Jefe de área solo puede ver tickets de su área
-            if ($ticket->area_id !== $user->area_id) {
+            if (! $areaId && $ticket->created_by !== $user->id && (int) $ticket->assigned_to !== (int) $user->id) {
                 return response()->json([
                     'success' => false,
                     'message' => 'No autorizado',
@@ -212,7 +199,7 @@ class TicketController extends Controller
     {
         $ticket = Ticket::find($id);
 
-        if (!$ticket) {
+        if (! $ticket) {
             return response()->json([
                 'success' => false,
                 'message' => 'Ticket no encontrado',
@@ -239,10 +226,10 @@ class TicketController extends Controller
             $clientName = $ticket->client?->business_name ?? $ticket->client?->legal_name ?? 'Cliente';
             $title = $previousAssignedTo ? "Ticket reasignado: {$ticket->ticket_number}" : "Ticket asignado: {$ticket->ticket_number}";
             $message = "Ticket para {$clientName}\n"
-                . "Título: {$ticket->title}\n"
-                . "Categoría: {$ticket->category}\n"
-                . "Prioridad: {$ticket->priority}\n"
-                . "Asignado por: " . ($actor?->name ?? 'Sistema');
+                ."Título: {$ticket->title}\n"
+                ."Categoría: {$ticket->category}\n"
+                ."Prioridad: {$ticket->priority}\n"
+                .'Asignado por: '.($actor?->name ?? 'Sistema');
             $actionUrl = "/tickets/{$ticket->id}";
             $data = [
                 'ticket_id' => $ticket->id,
@@ -258,13 +245,13 @@ class TicketController extends Controller
             NotificationService::sendPushNotifications([$assignedId], $title, $message, $actionUrl, $data);
 
             // Admin también debe recibir notificación de reasignación/asignación
-            $assignedName = $ticket->assignedTo?->name ?? ('Usuario #' . $assignedId);
+            $assignedName = $ticket->assignedTo?->name ?? ('Usuario #'.$assignedId);
             $adminTitle = $previousAssignedTo ? "Ticket reasignado: {$ticket->ticket_number}" : "Ticket asignado: {$ticket->ticket_number}";
             $adminMessage = "Se actualizó la asignación de un ticket.\n"
-                . "Cliente: {$clientName}\n"
-                . "Título: {$ticket->title}\n"
-                . "Asignado a: {$assignedName}\n"
-                . "Por: " . ($actor?->name ?? 'Sistema');
+                ."Cliente: {$clientName}\n"
+                ."Título: {$ticket->title}\n"
+                ."Asignado a: {$assignedName}\n"
+                .'Por: '.($actor?->name ?? 'Sistema');
             NotificationService::notifySuperAdmins('ticket', $adminTitle, $adminMessage, $actionUrl, 'normal', $data);
         } catch (\Throwable $e) {
             \Log::error('Ticket assign: notification to assigned support failed', [
@@ -285,14 +272,14 @@ class TicketController extends Controller
     {
         $ticket = Ticket::with(['client', 'createdBy', 'assignedTo'])->find($id);
 
-        if (!$ticket) {
+        if (! $ticket) {
             return response()->json([
                 'success' => false,
                 'message' => 'Ticket no encontrado',
             ], 404);
         }
 
-        if (!$ticket->assigned_to) {
+        if (! $ticket->assigned_to) {
             return response()->json([
                 'success' => false,
                 'message' => 'El ticket no tiene un usuario asignado',
@@ -306,10 +293,10 @@ class TicketController extends Controller
             $clientName = $ticket->client?->business_name ?? $ticket->client?->legal_name ?? 'Cliente';
             $title = "Recordatorio: {$ticket->ticket_number}";
             $message = "Recordatorio de ticket para {$clientName}\n"
-                . "Título: {$ticket->title}\n"
-                . "Categoría: {$ticket->category}\n"
-                . "Prioridad: {$ticket->priority}\n"
-                . "Reenviado por: " . ($actor?->name ?? 'Sistema');
+                ."Título: {$ticket->title}\n"
+                ."Categoría: {$ticket->category}\n"
+                ."Prioridad: {$ticket->priority}\n"
+                .'Reenviado por: '.($actor?->name ?? 'Sistema');
             $actionUrl = "/tickets/{$ticket->id}";
             $data = [
                 'ticket_id' => $ticket->id,
@@ -331,6 +318,7 @@ class TicketController extends Controller
                 'ticket_id' => $ticket->id,
                 'error' => $e->getMessage(),
             ]);
+
             return response()->json([
                 'success' => false,
                 'message' => 'No se pudo reenviar la notificación',
@@ -347,7 +335,7 @@ class TicketController extends Controller
     {
         $ticket = Ticket::find($id);
 
-        if (!$ticket) {
+        if (! $ticket) {
             return response()->json([
                 'success' => false,
                 'message' => 'Ticket no encontrado',
@@ -376,7 +364,7 @@ class TicketController extends Controller
     {
         $ticket = Ticket::find($id);
 
-        if (!$ticket) {
+        if (! $ticket) {
             return response()->json([
                 'success' => false,
                 'message' => 'Ticket no encontrado',
@@ -404,21 +392,12 @@ class TicketController extends Controller
         $query = Ticket::query();
 
         // Aplicar filtros de área si se proporciona
-        if ($request->has('area_id') && !empty($request->area_id)) {
+        if ($request->has('area_id') && ! empty($request->area_id)) {
             $query->where('area_id', $request->area_id);
         }
 
-        // Filtros por permisos - Super Admin ve todo
         $user = Auth::user();
-        if ($user->isSuperAdmin()) {
-            // Super Admin ve todas las estadísticas - no aplicar filtros de usuario
-        } elseif ($user->hasRole('personal')) {
-            // Personal solo ve estadísticas de sus tickets
-            $query->where('created_by', $user->id);
-        } elseif ($user->hasRole('jefe_area') && $user->area_id) {
-            // Jefe de área ve estadísticas de su área
-            $query->where('area_id', $user->area_id);
-        }
+        Visibility::apply($query, $user, 'tickets', 'created_by');
 
         $stats = [
             'total' => $query->count(),

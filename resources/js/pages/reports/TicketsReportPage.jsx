@@ -26,12 +26,12 @@ export default function TicketsReportPage() {
 
   const { data: users } = useQuery({
     queryKey: ['users'],
-    queryFn: async () => (await apiClient.get('/users', { params: { per_page: 200 } })).data.data || [],
+    queryFn: async () => (await apiClient.get('/lookups/users')).data.data || [],
   });
 
   const { data: clients } = useQuery({
     queryKey: ['clients'],
-    queryFn: async () => (await apiClient.get('/clients', { params: { per_page: 200 } })).data.data || [],
+    queryFn: async () => (await apiClient.get('/lookups/clients')).data.data || [],
   });
 
   const params = useMemo(() => {

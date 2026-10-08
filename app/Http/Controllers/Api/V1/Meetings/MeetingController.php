@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\V1\Meetings;
 use App\Http\Controllers\Controller;
 use App\Models\Meeting;
 use App\Services\NotificationService;
+use App\Support\Visibility;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -19,7 +20,7 @@ class MeetingController extends Controller
             $query->where('area_id', $request->area_id);
         }
 
-        if ($request->has('status') && !empty($request->status)) {
+        if ($request->has('status') && ! empty($request->status)) {
             $query->where('status', $request->status);
         }
 
@@ -27,20 +28,8 @@ class MeetingController extends Controller
             $query->whereBetween('start_time', [$request->start_date, $request->end_date]);
         }
 
-        // Ver reuniones donde el usuario está invitado
         $user = Auth::user();
-        
-        // Super Admin ve todas las reuniones sin filtros de usuario
-        if (!$user->isSuperAdmin()) {
-            // Para otros usuarios, solo mostrar sus reuniones
-            // Si my_meetings está activado, mostrar solo sus reuniones
-            // Si no está activado, también mostrar solo sus reuniones (comportamiento por defecto)
-            $query->where(function($q) use ($user) {
-                $q->where('organizer_id', $user->id)
-                  ->orWhereJsonContains('attendees', $user->id);
-            });
-        }
-        // Si es Super Admin, no aplicar ningún filtro - ver todas las reuniones
+        Visibility::apply($query, $user, 'meetings', 'organizer_id');
 
         $perPage = $request->get('per_page', 15);
         $meetings = $query->latest('start_time')->paginate($perPage);
@@ -80,11 +69,14 @@ class MeetingController extends Controller
         $validated['organizer_id'] = Auth::id();
         $validated['status'] = 'scheduled';
         $validated['send_reminders'] = $validated['send_reminders'] ?? true;
+        if (empty($validated['area_id'])) {
+            $validated['area_id'] = Visibility::areaId(Auth::user());
+        }
 
         $meeting = Meeting::create($validated);
 
         // Notificar a los asistentes asignados al crear la reunión (DB + Push)
-        if (!empty($validated['attendees'])) {
+        if (! empty($validated['attendees'])) {
             $attendeeIds = $validated['attendees'];
             $startTime = \Carbon\Carbon::parse($validated['start_time']);
             $endTime = \Carbon\Carbon::parse($validated['end_time']);
@@ -93,26 +85,26 @@ class MeetingController extends Controller
             $organizerName = Auth::user()?->name ?? 'Organizador';
 
             $messageParts = [
-                "Has sido invitado a una reunión.",
+                'Has sido invitado a una reunión.',
                 "Título: {$validated['title']}",
                 "Organizador: {$organizerName}",
                 "Inicio: {$formattedStart}",
                 "Fin: {$formattedEnd}",
             ];
 
-            if (!empty($validated['location'])) {
+            if (! empty($validated['location'])) {
                 $messageParts[] = "Ubicación: {$validated['location']}";
             }
-            if (!empty($validated['meeting_link'])) {
+            if (! empty($validated['meeting_link'])) {
                 $messageParts[] = "Enlace: {$validated['meeting_link']}";
             }
-            if (!empty($validated['agenda'])) {
+            if (! empty($validated['agenda'])) {
                 $agenda = trim($validated['agenda']);
-                $agenda = mb_strlen($agenda) > 160 ? (mb_substr($agenda, 0, 160) . '...') : $agenda;
+                $agenda = mb_strlen($agenda) > 160 ? (mb_substr($agenda, 0, 160).'...') : $agenda;
                 $messageParts[] = "Agenda: {$agenda}";
             }
-            
-            $title = 'Nueva reunión: ' . $validated['title'];
+
+            $title = 'Nueva reunión: '.$validated['title'];
             $message = implode("\n", $messageParts);
             $actionUrl = "/meetings/{$meeting->id}";
             $data = [
@@ -130,13 +122,13 @@ class MeetingController extends Controller
 
             // Admin debe recibir notificación de toda reunión creada
             try {
-                $adminTitle = 'Reunión creada: ' . $validated['title'];
+                $adminTitle = 'Reunión creada: '.$validated['title'];
                 $adminMessage = "Se creó una reunión.\n"
-                    . "Título: {$validated['title']}\n"
-                    . "Organizador: {$organizerName}\n"
-                    . "Inicio: {$formattedStart}\n"
-                    . "Fin: {$formattedEnd}\n"
-                    . "Asistentes: " . count($attendeeIds);
+                    ."Título: {$validated['title']}\n"
+                    ."Organizador: {$organizerName}\n"
+                    ."Inicio: {$formattedStart}\n"
+                    ."Fin: {$formattedEnd}\n"
+                    .'Asistentes: '.count($attendeeIds);
                 NotificationService::notifySuperAdmins('meeting', $adminTitle, $adminMessage, $actionUrl, 'normal', $data);
             } catch (\Throwable $e) {
                 \Log::error('Meeting create: notify super admins failed', [
@@ -157,27 +149,31 @@ class MeetingController extends Controller
     {
         $meeting = Meeting::with(['organizer', 'area'])->find($id);
 
-        if (!$meeting) {
+        if (! $meeting) {
             return response()->json([
                 'success' => false,
                 'message' => 'Reunión no encontrada',
             ], 404);
         }
 
-        // Verificar permisos - Super Admin puede ver todo
         $user = Auth::user();
-        if ($user->isSuperAdmin()) {
-            // Super Admin puede ver todo - no hacer ninguna verificación adicional
-        } else {
-            // Verificar si el usuario es organizador o está en la lista de asistentes
-            $isOrganizer = $meeting->organizer_id === $user->id;
-            $isAttendee = in_array($user->id, $meeting->attendees ?? []);
-            
-            if (!$isOrganizer && !$isAttendee) {
+        if (! $user->isSuperAdmin()) {
+            $areaId = Visibility::areaId($user);
+            if ($areaId && (int) $meeting->area_id !== (int) $areaId) {
                 return response()->json([
                     'success' => false,
                     'message' => 'No autorizado',
                 ], 403);
+            }
+            if (! $areaId) {
+                $isOrganizer = $meeting->organizer_id === $user->id;
+                $isAttendee = in_array($user->id, $meeting->attendees ?? []);
+                if (! $isOrganizer && ! $isAttendee) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'No autorizado',
+                    ], 403);
+                }
             }
         }
 
@@ -191,7 +187,7 @@ class MeetingController extends Controller
     {
         $meeting = Meeting::find($id);
 
-        if (!$meeting) {
+        if (! $meeting) {
             return response()->json([
                 'success' => false,
                 'message' => 'Reunión no encontrada',
@@ -199,7 +195,7 @@ class MeetingController extends Controller
         }
 
         $user = Auth::user();
-        if ($meeting->organizer_id !== $user->id && !$user->isSuperAdmin()) {
+        if ($meeting->organizer_id !== $user->id && ! $user->isSuperAdmin()) {
             return response()->json([
                 'success' => false,
                 'message' => 'No autorizado',
@@ -240,7 +236,7 @@ class MeetingController extends Controller
     {
         $meeting = Meeting::find($id);
 
-        if (!$meeting) {
+        if (! $meeting) {
             return response()->json([
                 'success' => false,
                 'message' => 'Reunión no encontrada',
@@ -248,7 +244,7 @@ class MeetingController extends Controller
         }
 
         $user = Auth::user();
-        if ($meeting->organizer_id !== $user->id && !$user->isSuperAdmin()) {
+        if ($meeting->organizer_id !== $user->id && ! $user->isSuperAdmin()) {
             return response()->json([
                 'success' => false,
                 'message' => 'No autorizado',
@@ -271,7 +267,7 @@ class MeetingController extends Controller
     {
         $meeting = Meeting::with(['organizer'])->find($id);
 
-        if (!$meeting) {
+        if (! $meeting) {
             return response()->json([
                 'success' => false,
                 'message' => 'Reunión no encontrada',
@@ -279,7 +275,7 @@ class MeetingController extends Controller
         }
 
         $user = Auth::user();
-        if ($meeting->organizer_id !== $user->id && !$user->isSuperAdmin()) {
+        if ($meeting->organizer_id !== $user->id && ! $user->isSuperAdmin()) {
             return response()->json([
                 'success' => false,
                 'message' => 'No autorizado',
@@ -299,25 +295,25 @@ class MeetingController extends Controller
         $organizerName = $meeting->organizer?->name ?? 'Organizador';
 
         $messageParts = [
-            "Recordatorio de reunión.",
+            'Recordatorio de reunión.',
             "Título: {$meeting->title}",
             "Organizador: {$organizerName}",
             "Inicio: {$formattedStart}",
             "Fin: {$formattedEnd}",
         ];
-        if (!empty($meeting->location)) {
+        if (! empty($meeting->location)) {
             $messageParts[] = "Ubicación: {$meeting->location}";
         }
-        if (!empty($meeting->meeting_link)) {
+        if (! empty($meeting->meeting_link)) {
             $messageParts[] = "Enlace: {$meeting->meeting_link}";
         }
-        if (!empty($meeting->agenda)) {
+        if (! empty($meeting->agenda)) {
             $agenda = trim($meeting->agenda);
-            $agenda = mb_strlen($agenda) > 160 ? (mb_substr($agenda, 0, 160) . '...') : $agenda;
+            $agenda = mb_strlen($agenda) > 160 ? (mb_substr($agenda, 0, 160).'...') : $agenda;
             $messageParts[] = "Agenda: {$agenda}";
         }
 
-        $title = 'Reunión (reenvío): ' . $meeting->title;
+        $title = 'Reunión (reenvío): '.$meeting->title;
         $message = implode("\n", $messageParts);
         $actionUrl = "/meetings/{$meeting->id}";
         $data = [

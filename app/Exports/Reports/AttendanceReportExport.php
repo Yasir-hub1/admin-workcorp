@@ -3,42 +3,48 @@
 namespace App\Exports\Reports;
 
 use App\Models\Attendance;
+use App\Services\Attendance\AttendanceMetricsCalculator;
+use App\Support\Visibility;
 use Carbon\Carbon;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Auth;
 use Maatwebsite\Excel\Concerns\FromCollection;
 use Maatwebsite\Excel\Concerns\WithHeadings;
 use Maatwebsite\Excel\Concerns\WithMapping;
 
 class AttendanceReportExport implements FromCollection, WithHeadings, WithMapping
 {
-    public function __construct(private array $filters = [])
-    {
-    }
+    public function __construct(private array $filters = []) {}
 
     public function collection(): Collection
     {
         $groupBy = $this->filters['group_by'] ?? 'day';
-        if (!in_array($groupBy, ['day', 'week', 'month'], true)) {
+        if (! in_array($groupBy, ['day', 'week', 'month'], true)) {
             $groupBy = 'day';
         }
 
         $startDate = $this->filters['start_date'] ?? now()->startOfMonth()->toDateString();
         $endDate = $this->filters['end_date'] ?? now()->endOfMonth()->toDateString();
 
+        $actor = Auth::user();
         $q = Attendance::query()
-            ->with(['user'])
+            ->with(['user.staff', 'records'])
             ->whereBetween('date', [$startDate, $endDate]);
 
-        if (!empty($this->filters['user_id'])) {
+        if (! empty($this->filters['user_id'])) {
             $q->where('user_id', $this->filters['user_id']);
         }
 
-        if (!empty($this->filters['area_id'])) {
-            $areaId = (int) $this->filters['area_id'];
-            $q->whereHas('user', fn ($qq) => $qq->where('area_id', $areaId));
+        $requestedAreaId = $actor
+            ? Visibility::requestedAreaId($actor, $this->filters['area_id'] ?? null)
+            : (! empty($this->filters['area_id']) ? (int) $this->filters['area_id'] : null);
+        if ($requestedAreaId) {
+            $q->whereHas('user', fn ($qq) => $qq->where('area_id', $requestedAreaId)
+                ->orWhereHas('staff', fn ($staff) => $staff->where('area_id', $requestedAreaId)));
         }
 
-        $attendances = $q->orderBy('date')->get();
+        $attendances = app(AttendanceMetricsCalculator::class)
+            ->hydrateCollection($q->orderBy('date')->get());
 
         $rows = $attendances
             ->groupBy(function (Attendance $a) use ($groupBy) {
@@ -49,6 +55,7 @@ class AttendanceReportExport implements FromCollection, WithHeadings, WithMappin
                 if ($groupBy === 'month') {
                     return $date->format('Y-m');
                 }
+
                 return $date->format('Y-m-d');
             })
             ->flatMap(function ($bucket, $periodKey) use ($groupBy) {
@@ -58,6 +65,7 @@ class AttendanceReportExport implements FromCollection, WithHeadings, WithMappin
                     $minutes = (int) $items->sum('total_minutes');
                     $overtime = (int) $items->sum('overtime_minutes');
                     $late = (int) $items->sum('late_minutes');
+                    $earlyLeave = (int) $items->sum('early_leave_minutes');
                     $daysWorked = (int) $items->filter(fn (Attendance $a) => (int) $a->total_minutes > 0)->count();
                     $absentDays = (int) $items->filter(fn (Attendance $a) => (bool) $a->is_absent)->count();
 
@@ -77,6 +85,8 @@ class AttendanceReportExport implements FromCollection, WithHeadings, WithMappin
                         'overtime_hours' => round($overtime / 60, 2),
                         'late_minutes' => $late,
                         'late_hours' => round($late / 60, 2),
+                        'early_leave_minutes' => $earlyLeave,
+                        'early_leave_hours' => round($earlyLeave / 60, 2),
                     ];
                 })->values();
             })
@@ -105,6 +115,8 @@ class AttendanceReportExport implements FromCollection, WithHeadings, WithMappin
             'Horas extra',
             'Minutos tarde',
             'Horas tarde',
+            'Minutos salida anticipada',
+            'Horas salida anticipada',
         ];
     }
 
@@ -124,6 +136,8 @@ class AttendanceReportExport implements FromCollection, WithHeadings, WithMappin
             $row['overtime_hours'],
             $row['late_minutes'],
             $row['late_hours'],
+            $row['early_leave_minutes'],
+            $row['early_leave_hours'],
         ];
     }
 
@@ -135,17 +149,17 @@ class AttendanceReportExport implements FromCollection, WithHeadings, WithMappin
             $week = (int) ($parts[1] ?? 0);
             $start = Carbon::now()->setISODate($year, $week)->startOfWeek(Carbon::MONDAY);
             $end = (clone $start)->endOfWeek(Carbon::SUNDAY);
+
             return [$start->toDateString(), $end->toDateString()];
         }
 
         if ($groupBy === 'month') {
             $start = Carbon::createFromFormat('Y-m', $key)->startOfMonth();
             $end = (clone $start)->endOfMonth();
+
             return [$start->toDateString(), $end->toDateString()];
         }
 
         return [$key, $key];
     }
 }
-
-

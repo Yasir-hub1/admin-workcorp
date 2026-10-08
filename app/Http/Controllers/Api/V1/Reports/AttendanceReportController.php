@@ -5,7 +5,8 @@ namespace App\Http\Controllers\Api\V1\Reports;
 use App\Http\Controllers\Controller;
 use App\Models\Attendance;
 use App\Models\AttendanceRecord;
-use App\Models\User;
+use App\Services\Attendance\AttendanceMetricsCalculator;
+use App\Support\Visibility;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -16,29 +17,32 @@ class AttendanceReportController extends Controller
     public function index(Request $request): JsonResponse
     {
         $groupBy = $request->get('group_by', 'day'); // day|week|month
-        if (!in_array($groupBy, ['day', 'week', 'month'], true)) {
+        if (! in_array($groupBy, ['day', 'week', 'month'], true)) {
             $groupBy = 'day';
         }
 
         $startDate = $request->get('start_date', now()->startOfMonth()->toDateString());
         $endDate = $request->get('end_date', now()->endOfMonth()->toDateString());
 
+        $actor = $request->user();
         $query = Attendance::query()
-            ->with(['user'])
+            ->with(['user.staff', 'records'])
             ->whereBetween('date', [$startDate, $endDate]);
 
         if ($request->filled('user_id')) {
             $query->where('user_id', $request->user_id);
         }
 
-        if ($request->filled('area_id')) {
-            $areaId = (int) $request->area_id;
-            $query->whereHas('user', function ($q) use ($areaId) {
-                $q->where('area_id', $areaId);
+        $requestedAreaId = Visibility::requestedAreaId($actor, $request->get('area_id'));
+        if ($requestedAreaId) {
+            $query->whereHas('user', function ($q) use ($requestedAreaId) {
+                $q->where('area_id', $requestedAreaId)
+                    ->orWhereHas('staff', fn ($staff) => $staff->where('area_id', $requestedAreaId));
             });
         }
 
-        $attendances = $query->orderBy('date')->get();
+        $attendances = app(AttendanceMetricsCalculator::class)
+            ->hydrateCollection($query->orderBy('date')->get());
 
         $rows = $attendances
             ->groupBy(function (Attendance $a) use ($groupBy) {
@@ -49,6 +53,7 @@ class AttendanceReportController extends Controller
                 if ($groupBy === 'month') {
                     return $date->format('Y-m');
                 }
+
                 return $date->format('Y-m-d');
             })
             ->flatMap(function ($bucket, $periodKey) use ($groupBy) {
@@ -61,8 +66,10 @@ class AttendanceReportController extends Controller
                     $minutes = (int) $items->sum('total_minutes');
                     $overtimeMinutes = (int) $items->sum('overtime_minutes');
                     $lateMinutes = (int) $items->sum('late_minutes');
+                    $earlyLeaveMinutes = (int) $items->sum('early_leave_minutes');
                     $daysWorked = (int) $items->filter(fn (Attendance $a) => (int) $a->total_minutes > 0)->count();
                     $absentDays = (int) $items->filter(fn (Attendance $a) => (bool) $a->is_absent)->count();
+                    $lateDays = (int) $items->filter(fn (Attendance $a) => (bool) $a->is_late)->count();
 
                     [$periodStart, $periodEnd] = $this->periodRange($periodKey, $groupBy);
 
@@ -82,6 +89,9 @@ class AttendanceReportController extends Controller
                         'overtime_hours' => round($overtimeMinutes / 60, 2),
                         'late_minutes' => $lateMinutes,
                         'late_hours' => round($lateMinutes / 60, 2),
+                        'late_days' => $lateDays,
+                        'early_leave_minutes' => $earlyLeaveMinutes,
+                        'early_leave_hours' => round($earlyLeaveMinutes / 60, 2),
                     ];
                 })->values();
             })
@@ -127,22 +137,15 @@ class AttendanceReportController extends Controller
         $startDate = $validated['start_date'] ?? now()->startOfMonth()->toDateString();
         $endDate = $validated['end_date'] ?? now()->endOfMonth()->toDateString();
 
-        // Seguridad: jefe_area solo puede ver su área. Admin ve todo.
-        if (!$user->isSuperAdmin()) {
-            if (!$user->hasPermission('reports.view-area') || !$user->area_id) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'No autorizado',
-                ], 403);
-            }
-
-            $target = User::select('id', 'area_id')->find($targetUserId);
-            if (!$target || (int) $target->area_id !== (int) $user->area_id) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'No autorizado',
-                ], 403);
-            }
+        if (
+            ! $user->isSuperAdmin()
+            && ! $user->hasPermission('reports.view-all')
+            && ! $user->hasPermission('reports.view-area')
+        ) {
+            return response()->json([
+                'success' => false,
+                'message' => 'No autorizado',
+            ], 403);
         }
 
         $records = AttendanceRecord::query()
@@ -159,6 +162,7 @@ class AttendanceReportController extends Controller
             if ($lat === null || $lng === null) {
                 return null;
             }
+
             return [
                 'id' => $r->id,
                 'attendance_id' => $r->attendance_id,
@@ -192,12 +196,14 @@ class AttendanceReportController extends Controller
             $week = (int) ($parts[1] ?? 0);
             $start = Carbon::now()->setISODate($year, $week)->startOfWeek(Carbon::MONDAY);
             $end = (clone $start)->endOfWeek(Carbon::SUNDAY);
+
             return [$start->toDateString(), $end->toDateString()];
         }
 
         if ($groupBy === 'month') {
             $start = Carbon::createFromFormat('Y-m', $key)->startOfMonth();
             $end = (clone $start)->endOfMonth();
+
             return [$start->toDateString(), $end->toDateString()];
         }
 
@@ -207,7 +213,7 @@ class AttendanceReportController extends Controller
 
     private function parseLatLng(?string $location): array
     {
-        if (!$location) {
+        if (! $location) {
             return [null, null];
         }
         $parts = array_map('trim', explode(',', $location));
@@ -219,8 +225,7 @@ class AttendanceReportController extends Controller
         if ($lat === null || $lng === null) {
             return [null, null];
         }
+
         return [$lat, $lng];
     }
 }
-
-
