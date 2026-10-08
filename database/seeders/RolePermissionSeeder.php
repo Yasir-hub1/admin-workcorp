@@ -228,7 +228,7 @@ class RolePermissionSeeder extends Seeder
             // Requests
             'requests.create', 'requests.view-area', 'requests.approve', 'requests.reject',
             // Schedules
-            'schedules.view-area', 'schedules.create', 'schedules.approve',
+            'schedules.view-area', 'schedules.create', 'schedules.edit', 'schedules.approve',
             // Meetings
             'meetings.view-area', 'meetings.create', 'meetings.edit', 'meetings.resend-push',
             // Expenses
@@ -302,8 +302,8 @@ class RolePermissionSeeder extends Seeder
         );
 
         $this->command->info('Roles and permissions created successfully!');
-        $this->command->info('Super Admin has ' . count($allPermissions) . ' permissions');
-        $this->command->info('Jefe de Área has ' . count($jefeAreaPermissions) . ' permissions');
-        $this->command->info('Personal has ' . count($personalPermissions) . ' permissions');
+        $this->command->info('Super Admin has '.count($allPermissions).' permissions');
+        $this->command->info('Jefe de Área has '.count($jefeAreaPermissions).' permissions');
+        $this->command->info('Personal has '.count($personalPermissions).' permissions');
     }
 }

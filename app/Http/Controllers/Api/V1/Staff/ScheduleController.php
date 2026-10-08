@@ -5,13 +5,19 @@ namespace App\Http\Controllers\Api\V1\Staff;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\V1\Schedules\ScheduleResource;
 use App\Models\Schedule;
+use App\Services\Staff\ScheduleAssignmentService;
 use App\Support\Visibility;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 
 class ScheduleController extends Controller
 {
+    public function __construct(
+        private readonly ScheduleAssignmentService $assignment,
+    ) {}
+
     public function index(Request $request): JsonResponse
     {
         $query = Schedule::with(['user.area', 'approvedBy']);
@@ -51,14 +57,28 @@ class ScheduleController extends Controller
             'month' => 'required|date_format:Y-m',
             'schedule_data' => 'required|array',
             'notes' => 'nullable|string',
+            'user_id' => 'nullable|integer|exists:users,id',
         ]);
 
-        $validated['user_id'] = Auth::id();
+        $actor = Auth::user();
+
+        try {
+            $targetUserId = $this->assignment->resolveTargetUserId(
+                $actor,
+                isset($validated['user_id']) ? (int) $validated['user_id'] : null,
+            );
+        } catch (AuthorizationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage(),
+            ], 403);
+        }
+
+        $validated['user_id'] = $targetUserId;
         $validated['is_approved'] = false;
         $validated['month'] = $validated['month'].'-01';
 
-        // Verificar si ya existe un horario para ese mes
-        $existing = Schedule::where('user_id', Auth::id())
+        $existing = Schedule::where('user_id', $targetUserId)
             ->where('month', $validated['month'])
             ->first();
 
@@ -175,14 +195,14 @@ class ScheduleController extends Controller
         }
 
         $user = Auth::user();
-        if ($schedule->user_id !== $user->id && ! $user->isSuperAdmin()) {
+        if (! $this->assignment->canManageSchedule($user, $schedule)) {
             return response()->json([
                 'success' => false,
                 'message' => 'No autorizado',
             ], 403);
         }
 
-        if ($schedule->is_approved && ! $user->isSuperAdmin()) {
+        if ($schedule->is_approved && ! $this->assignment->canEditApprovedSchedule($user)) {
             return response()->json([
                 'success' => false,
                 'message' => 'No puedes editar un horario ya aprobado',

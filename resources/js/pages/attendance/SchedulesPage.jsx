@@ -156,7 +156,7 @@ export default function SchedulesPage() {
           <div>
             <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Horarios</h1>
             <p className="mt-1 text-sm text-gray-500">
-              Gestiona los horarios mensuales del personal
+              Crea y gestiona los horarios mensuales del personal de tu área
             </p>
           </div>
           <div className="flex gap-2">

@@ -7,6 +7,7 @@ import apiClient from '../../api/client';
 import Button from '../../components/common/Button';
 import Card from '../../components/common/Card';
 import Input from '../../components/common/Input';
+import Select from '../../components/common/Select';
 import Textarea from '../../components/common/Textarea';
 import toast from 'react-hot-toast';
 import useAuthStore from '../../store/authStore';
@@ -25,13 +26,15 @@ export default function CreateSchedulePage() {
   const navigate = useNavigate();
   const { id } = useParams();
   const queryClient = useQueryClient();
-  const { isAuthenticated, user } = useAuthStore();
+  const { isAuthenticated, user, isJefeArea, isSuperAdmin } = useAuthStore();
   const isEdit = !!id;
+  const canAssignStaff = isJefeArea() || isSuperAdmin();
 
   const [selectedMonth, setSelectedMonth] = useState(
     new Date().toISOString().slice(0, 7)
   );
   const [notes, setNotes] = useState('');
+  const [selectedUserId, setSelectedUserId] = useState('');
   const [scheduleData, setScheduleData] = useState({
     monday: { enabled: true, start_time: '08:00', end_time: '17:00' },
     tuesday: { enabled: true, start_time: '08:00', end_time: '17:00' },
@@ -53,9 +56,22 @@ export default function CreateSchedulePage() {
     retry: 1,
   });
 
+  const { data: staffUsers = [] } = useQuery({
+    queryKey: ['lookups-users-schedules'],
+    queryFn: async () => {
+      const response = await apiClient.get('/lookups/users');
+      return response.data?.data || [];
+    },
+    enabled: canAssignStaff && isAuthenticated && !!user,
+    retry: 1,
+  });
+
   // Actualizar formulario cuando se cargan los datos
   useEffect(() => {
     if (isEdit && schedule && !loadingSchedule) {
+      if (schedule.user_id) {
+        setSelectedUserId(String(schedule.user_id));
+      }
       if (schedule.month) {
         setSelectedMonth(schedule.month);
       }
@@ -101,11 +117,17 @@ export default function CreateSchedulePage() {
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    
+
+    if (canAssignStaff && !isEdit && !selectedUserId) {
+      toast.error('Selecciona el personal para el que crearás el horario');
+      return;
+    }
+
     mutation.mutate({
       month: selectedMonth,
       schedule_data: scheduleData,
       notes: notes || null,
+      ...(canAssignStaff && selectedUserId ? { user_id: Number(selectedUserId) } : {}),
     });
   };
 
@@ -160,7 +182,11 @@ export default function CreateSchedulePage() {
               {isEdit ? 'Editar Horario' : 'Nuevo Horario Mensual'}
             </h1>
             <p className="mt-1 text-sm text-gray-500">
-              {isEdit ? 'Modifica los horarios del mes' : 'Define los horarios de trabajo por día de la semana'}
+              {isEdit
+                ? 'Modifica los horarios del mes'
+                : canAssignStaff
+                  ? 'Define el horario mensual de un miembro de tu área'
+                  : 'Define los horarios de trabajo por día de la semana'}
             </p>
           </div>
         </div>
@@ -170,6 +196,20 @@ export default function CreateSchedulePage() {
           <form onSubmit={handleSubmit} className="space-y-6">
             {/* Mes */}
             <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
+              {canAssignStaff && (
+                <Select
+                  label="Personal"
+                  required
+                  value={selectedUserId}
+                  onChange={(e) => setSelectedUserId(e.target.value)}
+                  disabled={isEdit}
+                  placeholder="Selecciona al personal"
+                  options={staffUsers.map((member) => ({
+                    value: String(member.id),
+                    label: member.email ? `${member.name} (${member.email})` : member.name,
+                  }))}
+                />
+              )}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Mes <span className="text-red-500">*</span>
